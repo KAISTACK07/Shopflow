@@ -1,0 +1,3 @@
+# Always LF in the repo and the working tree, even on Windows: shell scripts with CRLF fail inside
+# Linux containers ("bad interpreter"), and consistent endings keep diffs clean.
+* text=auto eol=lf
