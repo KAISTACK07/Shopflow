@@ -21,6 +21,7 @@ All links below were checked to resolve on 2026-09-26.
 | 13 | [PyJWT usage docs](https://pyjwt.readthedocs.io/en/stable/usage.html); RFC 8725 [JWT Best Current Practices](https://www.rfc-editor.org/rfc/rfc8725) | Pin allowed algorithms on decode, require `exp` | Tests forge `alg: none`, wrong-secret, expired and garbage tokens |
 | 14 | NIST [SP 800-63B](https://pages.nist.gov/800-63-4/sp800-63b.html); [argon2-cffi API](https://argon2-cffi.readthedocs.io/en/stable/api.html) | Length-based password policy; `check_needs_rehash` | Rehash-on-login plus a test that plants a weak hash and checks it's upgraded |
 | 15 | Pydantic docs — [`hide_input_in_errors`](https://docs.pydantic.dev/latest/api/config/) | Config flag to keep inputs out of validation errors | We found the leak with our own test (short `JWT_SECRET` printed in the error) before looking this up |
+| 16 | SQLAlchemy docs — [ORM API features: Populate Existing](https://docs.sqlalchemy.org/en/20/orm/queryguide/api.html) | `populate_existing` refreshes objects already in the identity map | We found we needed it by mutation-testing the concurrency test (16/16 "succeeded" without it) |
 
 ## Original to this project
 

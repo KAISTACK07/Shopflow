@@ -60,6 +60,39 @@ For one product, yes: an atomic conditional update. For a multi-item cart you st
 rows and a list of *which* items failed, so explicit locks in one transaction are clearer. Good to mention as an
 alternative.
 
+**73. You used `SELECT ... FOR UPDATE`. Why wasn't that enough on its own?**
+Because of the ORM identity map. `get_product()` had already loaded the inventory row (via `joinedload`) before
+we locked it. When the locking SELECT returned, SQLAlchemy kept the *existing* in-memory object with the old
+quantity. Each thread computed "10 − 1 = 9" from stale data, so all 16 removals "succeeded". Fix:
+`execution_options(populate_existing=True)` overwrites loaded objects with the freshly locked values. The mutation
+test proved each piece is necessary.
+
+**74. The DB has `CHECK (quantity >= 0)`. Why didn't it stop the lost-update bug?**
+No single write went negative: every thread wrote 9 (or 8...). A CHECK validates each row value, not whether
+the value was computed from up-to-date data. That's why you need locking (or atomic `SET quantity = quantity - 1`)
+*in addition to* constraints.
+
+**75. Why does the admin send a delta instead of the new quantity?**
+"Set stock to 8" is computed from what the admin saw on screen minutes ago; orders placed since then would be
+overwritten. A delta ("I found 2 broken units: −2") composes correctly with concurrent changes.
+
+**76. Does `ORDER BY` with `FOR UPDATE` really lock rows in that order?**
+Yes: PostgreSQL sorts first, then locks rows as it returns them. The docs warn that rows may come back out of
+order if the sort column is updated while you wait, but we sort by `product_id`, which never changes.
+
+**77. Why a single `apply_stock_change` function?**
+Every stock change (admin adjustment now, checkout and cancel later) goes through it, so the rules can't diverge:
+never below zero, and always write a movement row. It requires the caller to hold the lock and to commit.
+
+**78. Why can't an admin create an `order` or `cancel` movement by hand?**
+Those must always be tied to an order (`order_id`). If admins could write them, the ledger could claim sales that
+never happened. The API schema only allows `restock` (positive) and `adjustment`.
+
+**79. How did you test concurrency without a load-testing tool?**
+16 threads, each with its own session/connection, started together with a `threading.Barrier`, each removing
+1 unit from stock 10. Assert exactly 10 successes, 6 × `INSUFFICIENT_STOCK`, final stock 0, ledger sum 0. It runs
+against real PostgreSQL. The HTTP-level 50-buyer checkout test comes in the test phase.
+
 ## Idempotency
 
 **13. What problem does an Idempotency-Key solve?**
@@ -356,4 +389,7 @@ admin → 200, customer → 403, anonymous → 401. The dependency is tested on 
 - What is N+1, and how does your test prove the product list doesn't have it? (→ Q60)
 - Why escape `%` and `_` in the search term? Is it SQL injection? (→ Q63)
 - Why does a deactivated product return 404 to customers but 200 to admins? (→ Q64, and `get_optional_user`)
+- Why did the concurrency test still fail *with* `FOR UPDATE` when `populate_existing` was removed? (→ Q73)
+- Why doesn't the `quantity >= 0` CHECK constraint prevent lost updates? (→ Q74)
+- Why is the admin adjustment a delta, not an absolute quantity? (→ Q75)
 - Why must `os.environ["DATABASE_URL"]` be set at the top of `conftest.py` before importing the app? (`app.db` creates the engine at import time from settings; importing first would bind the tests to the dev database.)

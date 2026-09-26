@@ -250,6 +250,35 @@ log a warning (**fail open**: a Redis outage shouldn't stop all sales; the DB st
 - **Exposes `stock_quantity`** to everyone, so the UI can show "only 3 left" and cap the quantity picker.
   A real shop might show only "in stock / low stock"; noted as a product decision.
 
+## 5e. Inventory & movements (built in phase 6)
+
+| Endpoint (all admin) | Behaviour |
+|---|---|
+| `GET /api/inventory?low_stock=` | Stock per product (incl. inactive), `is_low_stock = quantity <= low_stock_threshold`. |
+| `PATCH /api/inventory/{product_id}` | `{delta, reason: restock\|adjustment, note}` and/or `{low_stock_threshold}`. Going below 0 → 409 `INSUFFICIENT_STOCK` with `{product_id, requested, available}`. |
+| `GET /api/inventory/{product_id}/movements` | Ledger, newest first (small addition to the spec). |
+
+- **Relative, not absolute:** admins send `delta: -2`, never `quantity: 8`. An absolute "set to 8" would overwrite
+  units sold between the admin loading the page and saving, a lost update the lock can't prevent.
+- **`order`/`cancel` reasons are system-only:** the API accepts only `restock` (must be positive) and
+  `adjustment`; the order flow writes the others.
+- **One path for every stock change:** `lock_inventory()` + `apply_stock_change()` (the checkout and cancel
+  flows reuse them). `apply_stock_change` refuses to go below zero and always adds the movement row, so
+  `SUM(delta) == quantity` holds for every product.
+- **Locking:** `SELECT ... FOR UPDATE ORDER BY product_id`, with `populate_existing=True`. PostgreSQL applies
+  `ORDER BY` first and locks rows in that order; the docs' caveat (rows may come back out of order if the sort
+  column changes while waiting) doesn't apply because `product_id` never changes.
+
+### What the concurrency test showed (local measurements)
+
+16 threads, each with its own connection, remove 1 unit from a stock of 10 at the same moment (5 runs per variant):
+
+| Variant | Result |
+|---|---|
+| `FOR UPDATE` + `populate_existing` (shipped code) | 5/5 pass: exactly 10 removals, 6 × 409, final stock 0, ledger sum 0 |
+| no `FOR UPDATE` | 5/5 fail: **all 16** removals "succeeded" (lost updates; the DB CHECK can't catch this because no single write goes negative) |
+| `FOR UPDATE` but no `populate_existing` | 5/5 fail: **all 16** "succeeded". The row *was* locked, but `get_product()` had already loaded it via `joinedload`, and SQLAlchemy's identity map kept the stale in-memory quantity instead of the value read after the lock. |
+
 ## 6. Testing strategy (sketch)
 
 - pytest against a real PostgreSQL test database (`<db>_test`, created automatically on the same server),
