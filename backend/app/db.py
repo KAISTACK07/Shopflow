@@ -3,6 +3,7 @@
 from collections.abc import Iterator
 
 from sqlalchemy import create_engine
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, sessionmaker
 
 from app.core.config import get_settings
@@ -24,3 +25,9 @@ def get_db() -> Iterator[Session]:
     """FastAPI dependency: one session per request, always closed afterwards."""
     with SessionLocal() as session:
         yield session
+
+
+def violated_constraint(exc: IntegrityError) -> str | None:
+    """Name of the constraint PostgreSQL reported, e.g. "uq_users_email" (psycopg exposes it via `diag`)."""
+    diag = getattr(exc.orig, "diag", None)
+    return getattr(diag, "constraint_name", None)

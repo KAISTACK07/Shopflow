@@ -14,3 +14,8 @@ MAX_CART_ITEM_QUANTITY = 100
 DEFAULT_LOW_STOCK_THRESHOLD = 5
 
 IDEMPOTENCY_KEY_MAX_LENGTH = 255
+
+# Length only, no "must contain a symbol" rules (NIST SP 800-63B). The max stops huge inputs from
+# being hashed on every login attempt.
+PASSWORD_MIN_LENGTH = 8
+PASSWORD_MAX_LENGTH = 128

@@ -184,6 +184,80 @@ An append-only ledger of every stock change with a reason (restock/order/cancel/
 caused it, and who did it. For each product, `SUM(delta)` should equal `inventory.quantity`: an audit check
 that can catch bugs.
 
+## Authentication & security
+
+**42. Walk me through login.**
+Normalise the email (trim + lower-case) → look up the user → verify the password against the argon2 hash
+(or against a dummy hash if there's no user) → on success, issue a JWT with `sub`, `iat`, `exp` → the client
+sends it as `Authorization: Bearer <token>`.
+
+**43. Why argon2id instead of bcrypt or SHA-256?**
+SHA-256 is fast, which is bad for passwords: GPUs try billions of guesses per second. bcrypt and argon2 are
+deliberately slow; argon2id is also *memory-hard*, which makes GPU/ASIC cracking expensive. It's OWASP's first
+recommendation. Salts are random per password and stored inside the hash string.
+
+**44. What is a salt and where is it stored?**
+Random bytes mixed into each hash so identical passwords get different hashes and precomputed (rainbow) tables
+don't work. argon2 stores it in the encoded hash (`$argon2id$v=19$m=...,t=...,p=...$<salt>$<hash>`), so there's
+no separate column.
+
+**45. What does "rehash on login" mean?**
+Hash parameters get stronger over time. We can't rehash stored hashes without the plain password, which we only
+see at login, so after a successful login we check `check_needs_rehash` and store a new hash if needed.
+
+**46. Why do wrong-password and unknown-email return the same response?**
+Different messages (or status codes) would let an attacker test which emails have accounts ("user enumeration").
+The body is identical, and the timing is equalised by verifying against a dummy hash when the user doesn't exist.
+Measured locally: ~0.10 s for both.
+
+**47. But `/register` returns 409 for an existing email. Isn't that enumeration too?**
+Yes, a known trade-off: most shops tell you "email already registered" because the UX benefit is large. Full
+protection would need email-based sign-up confirmation ("check your inbox"). Rate limiting sign-ups reduces
+bulk probing.
+
+**48. How do you handle two people registering the same email at the same moment?**
+No "SELECT then INSERT" pre-check (both could pass it). We just INSERT; the unique constraint `uq_users_email`
+lets only one succeed, and we map that specific `IntegrityError` (checked by constraint name via psycopg's
+`diag.constraint_name`) to 409. Other integrity errors are re-raised, not hidden.
+
+**49. What's inside your JWT? Is it encrypted?**
+`sub` (user id), `iat`, `exp`. It's *signed* (HS256), not encrypted: anyone can base64-decode and read it, but
+can't change it without the secret. So we put no sensitive data in it, not even the role.
+
+**50. What is the `alg: none` attack and how are you protected?**
+A forged token with header `alg: none` and no signature. A library that trusts the header would accept it. We
+pass `algorithms=["HS256"]` to `jwt.decode`, so any other algorithm is rejected. There's a test for this.
+
+**51. JWTs can't be revoked. How do you handle logout, or a banned user?**
+Short lifetime (30 min) and no refresh token here. We load the user from the DB on every request, so a deleted
+user is locked out immediately, and a role change applies immediately. Real logout would need a deny-list (e.g. token ids
+in Redis with a TTL) or server-side sessions. Listed as a limitation.
+
+**52. HS256 vs RS256?**
+HS256: one shared secret signs and verifies; fine when the same service does both. RS256: private key signs,
+public key verifies, which is better when many services verify tokens they didn't issue (they only get the public key).
+
+**53. 401 vs 403?**
+401 = we don't know who you are (missing/invalid/expired token), and it comes with `WWW-Authenticate: Bearer`.
+403 = we know who you are, but you're not allowed (a customer hitting an admin endpoint).
+
+**54. Why `extra="forbid"` on the register request?**
+Sending `{"role": "admin"}` gets a clear 422 instead of being silently ignored. It makes mass-assignment
+attempts visible and catches client typos. There's a test that sends `role` and checks no user was created.
+
+**55. Why no "must contain a digit and a symbol" password rules?**
+NIST SP 800-63B recommends length over composition rules; composition rules lead to predictable patterns
+(`Password1!`). We require 8–128 characters. The maximum stops someone sending a 1 MB "password" that we'd hash.
+
+**56. How is the JWT secret protected?**
+It comes from the environment, never from code; it's a `SecretStr` (masked in logs and reprs); it must be ≥32 chars;
+the `.env.example` placeholder is rejected at startup. A test found that Pydantic's validation error printed the
+rejected value, so settings use `hide_input_in_errors=True`.
+
+**57. Why load the user from the DB on every request? Isn't that the point of JWT to avoid?**
+It costs one primary-key lookup (sub-millisecond) and buys immediate lockout of deleted users and fresh roles.
+Fully stateless auth is a trade-off we chose not to make for an app this size.
+
 ## Testing
 
 **27. Why test against real PostgreSQL instead of SQLite?**
@@ -198,6 +272,16 @@ test that only expects "an error" could pass because of an unrelated NOT NULL vi
 Local development without Docker has no Redis. A permanently failing test teaches people to ignore red
 builds. The skip is printed with its reason in the summary; in Docker/CI, Redis is present so the test runs.
 
+**58. Tell me about a bug your tests caught.**
+Two in the auth phase: (1) a config test showed Pydantic's error message printed a rejected JWT secret; the fix was
+`hide_input_in_errors=True`. (2) A test of my own was wrong: it asserted the password `"short"` wasn't in the
+error text, but `"string_too_short"` contains it. The lesson: pick test data that can't collide with error text.
+Also from phase 3: the autogenerated migration duplicated CHECK constraints.
+
+**59. How do you test the admin guard without an admin endpoint yet?**
+A tiny FastAPI app in the test with one route depending on `AdminUser`, plus our real exception handlers:
+admin → 200, customer → 403, anonymous → 401. The dependency is tested on its own, independent of any feature.
+
 ## Phase "explain this" questions (from the reviews)
 
 - Why lock inventory rows sorted by `product_id`? (→ Q10)
@@ -208,4 +292,7 @@ builds. The skip is printed with its reason in the summary; in Docker/CI, Redis 
 - Why is `.env` read from the repo root, and why does a missing `.env` not crash the container? (Settings reads real env vars first; pydantic-settings silently skips a missing env file, so Docker passes values as environment variables.)
 - Why VARCHAR + CHECK for enums? (→ Q28)
 - What went wrong in the autogenerated migration, and how did you catch it? (→ Q30)
+- Why does login check a dummy hash when the email doesn't exist? (→ Q46)
+- Why is `jwt.decode` given `algorithms=[...]` explicitly? (→ Q50)
+- Why do we catch `IntegrityError` instead of checking whether the email exists first? (→ Q48)
 - Why must `os.environ["DATABASE_URL"]` be set at the top of `conftest.py` before importing the app? (`app.db` creates the engine at import time from settings; importing first would bind the tests to the dev database.)

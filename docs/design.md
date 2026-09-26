@@ -200,6 +200,32 @@ log a warning (**fail open**: a Redis outage shouldn't stop all sales; the DB st
 - Timeouts are short so a dead dependency fails fast: DB connect 3 s, Redis 0.5 s. With Redis down,
   `/api/health` took ~0.5 s (local measurement on the dev machine, Windows, 3 requests).
 
+## 5c. Authentication (built in phase 4)
+
+| Endpoint | Behaviour |
+|---|---|
+| `POST /api/auth/register` | `{email, password}` → 201 user. Always role `customer`; unknown fields (e.g. `role`) → 422. Duplicate email (any case) → 409 `EMAIL_ALREADY_REGISTERED`. |
+| `POST /api/auth/login` | `{email, password}` → `{access_token, token_type: "bearer", expires_in}`. Wrong password and unknown email return the *same* 401 `INVALID_CREDENTIALS`. |
+| `GET /api/auth/me` | The current user (small addition to the spec: the frontend needs the role after login). |
+
+- **Passwords:** argon2id (`argon2-cffi` defaults), length 8–128, no composition rules (NIST SP 800-63B).
+  Hashes made with older parameters are upgraded on the next successful login.
+- **User enumeration:** an unknown email is still checked against a dummy hash, so both failure cases take
+  ~0.10 s (local measurement, 5 requests each after warm-up; a fresh server's first request is ~0.25 s
+  whatever the email, because it opens the first DB connection).
+- **Duplicate emails:** no "does it exist?" pre-check; the insert hits `uq_users_email` and we translate the
+  `IntegrityError` (by constraint name) into 409. This is race-free, unlike check-then-insert.
+- **JWT:** HS256, claims `sub` (user id), `iat`, `exp`; the algorithm is pinned on decode (so `alg: none`
+  and other-algorithm tokens are rejected); `sub/exp/iat` are required. The user is loaded from the DB on every
+  request, so deleted users are locked out and role changes apply immediately.
+- **Guards:** `CurrentUser` dependency → 401 (with `WWW-Authenticate: Bearer`); `AdminUser` → 403 for customers.
+- **Secret handling:** `JWT_SECRET` is a `SecretStr`, at least 32 chars, and the `.env.example` placeholder
+  is rejected at startup. Settings use `hide_input_in_errors=True`: a test showed Pydantic's validation error
+  otherwise prints the rejected secret into the logs.
+- **Known limitations:** no refresh tokens, no logout/revocation list (tokens are short-lived instead), no
+  login rate limiting or lockout yet (only checkout is rate limited in this project), and the token is stored
+  client-side (see the frontend phase for the XSS trade-off).
+
 ## 6. Testing strategy (sketch)
 
 - pytest against a real PostgreSQL test database (`<db>_test`, created automatically on the same server),

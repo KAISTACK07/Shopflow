@@ -29,9 +29,14 @@ from fastapi.testclient import TestClient  # noqa: E402
 from redis import RedisError  # noqa: E402
 
 from app.core.redis import redis_client  # noqa: E402
+from app.core.security import create_access_token  # noqa: E402
 from app.db import SessionLocal, engine  # noqa: E402
 from app.main import app  # noqa: E402
-from app.models import Base  # noqa: E402
+from app.models import Base, Role, User  # noqa: E402
+from app.services.auth_service import register_user  # noqa: E402
+
+CUSTOMER_PASSWORD = "customer-pass-123"
+ADMIN_PASSWORD = "admin-pass-123"
 
 
 def _redis_is_reachable() -> bool:
@@ -85,3 +90,27 @@ def db() -> Iterator[Session]:
 def client() -> Iterator[TestClient]:
     with TestClient(app) as test_client:
         yield test_client
+
+
+def auth_headers(user: User) -> dict[str, str]:
+    return {"Authorization": f"Bearer {create_access_token(user.id)}"}
+
+
+@pytest.fixture
+def customer(db: Session) -> User:
+    return register_user(db, "customer@example.com", CUSTOMER_PASSWORD)
+
+
+@pytest.fixture
+def admin(db: Session) -> User:
+    return register_user(db, "admin@example.com", ADMIN_PASSWORD, role=Role.ADMIN)
+
+
+@pytest.fixture
+def customer_headers(customer: User) -> dict[str, str]:
+    return auth_headers(customer)
+
+
+@pytest.fixture
+def admin_headers(admin: User) -> dict[str, str]:
+    return auth_headers(admin)

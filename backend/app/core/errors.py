@@ -14,11 +14,36 @@ class AppError(Exception):
 
     status_code: int = HTTPStatus.BAD_REQUEST
     code: str = "BAD_REQUEST"
+    headers: dict[str, str] | None = None
 
-    def __init__(self, message: str, details: Any = None) -> None:
+    def __init__(self, message: str, details: Any = None, *, code: str | None = None) -> None:
         super().__init__(message)
         self.message = message
         self.details = details
+        if code is not None:
+            self.code = code
+
+
+class UnauthorizedError(AppError):
+    status_code = HTTPStatus.UNAUTHORIZED
+    code = "UNAUTHORIZED"
+    # RFC 9110: a 401 must tell the client which auth scheme to use.
+    headers = {"WWW-Authenticate": "Bearer"}
+
+
+class ForbiddenError(AppError):
+    status_code = HTTPStatus.FORBIDDEN
+    code = "FORBIDDEN"
+
+
+class NotFoundError(AppError):
+    status_code = HTTPStatus.NOT_FOUND
+    code = "NOT_FOUND"
+
+
+class ConflictError(AppError):
+    status_code = HTTPStatus.CONFLICT
+    code = "CONFLICT"
 
 
 def error_response(
@@ -36,7 +61,7 @@ def _code_for_status(status_code: int) -> str:
 
 
 async def _app_error_handler(_: Request, exc: AppError) -> JSONResponse:
-    return error_response(exc.status_code, exc.code, exc.message, exc.details)
+    return error_response(exc.status_code, exc.code, exc.message, exc.details, headers=exc.headers)
 
 
 async def _http_exception_handler(_: Request, exc: StarletteHTTPException) -> JSONResponse:
