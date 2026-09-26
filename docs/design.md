@@ -226,6 +226,30 @@ log a warning (**fail open**: a Redis outage shouldn't stop all sales; the DB st
   login rate limiting or lockout yet (only checkout is rate limited in this project), and the token is stored
   client-side (see the frontend phase for the XSS trade-off).
 
+## 5d. Products (built in phase 5)
+
+| Endpoint | Who | Notes |
+|---|---|---|
+| `GET /api/products?q=&limit=&offset=` | anyone | Active only. `q` searches name **or** SKU (case-insensitive). `include_inactive=true` is admin-only (403 otherwise). Returns `{items, total, limit, offset}`, newest first. |
+| `GET /api/products/{id}` | anyone | Inactive → 404 for customers/anonymous, visible to admins. |
+| `POST /api/products` | admin | Creates product + inventory row (+ a `restock` movement if `initial_stock > 0`) in one transaction. Duplicate SKU → 409 `SKU_ALREADY_EXISTS`. |
+| `PATCH /api/products/{id}` | admin | Partial update of `name`, `description`, `price_paise`, `is_active`. SKU is immutable; stock changes only via the inventory endpoint (phase 6), so they always leave a movement row. Explicit `null` → 422. |
+| `DELETE /api/products/{id}` | admin | Soft delete (`is_active=false`), 204, idempotent. Reactivate with `PATCH {"is_active": true}`. |
+
+- **Validation:** SKU is trimmed + upper-cased, then must match `^[A-Z0-9]+(-[A-Z0-9]+)*$` (3–64 chars);
+  price is an integer number of paise, `0 < price ≤ ₹10,00,000` (`499.5` → 422, never rounded); name 1–200 chars
+  after trimming; unknown fields → 422.
+- **Search safety:** `%`, `_` and `\` in `q` are escaped, so `q=%` finds products whose name contains "%"
+  instead of matching everything.
+- **No N+1:** listing loads stock with `joinedload` (one JOIN). A test counts SQL statements: exactly 2 per list
+  request (COUNT + SELECT). With the `joinedload` removed, the same test saw 17 statements for 15 products.
+- **Pagination:** offset/limit (max 100) ordered by `id DESC` (unique, so pages are stable). Keyset pagination
+  would scale better for deep pages; offset is fine at this catalogue size.
+- **Optional auth on public endpoints:** no token → anonymous; an invalid/expired token → 401 (not silently
+  treated as anonymous, which would hide an expired session from the client).
+- **Exposes `stock_quantity`** to everyone, so the UI can show "only 3 left" and cap the quantity picker.
+  A real shop might show only "in stock / low stock"; noted as a product decision.
+
 ## 6. Testing strategy (sketch)
 
 - pytest against a real PostgreSQL test database (`<db>_test`, created automatically on the same server),

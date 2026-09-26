@@ -5,6 +5,15 @@ from typing import Any
 from pydantic import BaseModel
 
 
+class Page[T](BaseModel):
+    """One page of a list endpoint. `total` lets the client render page numbers."""
+
+    items: list[T]
+    total: int
+    limit: int
+    offset: int
+
+
 class ErrorBody(BaseModel):
     code: str
     message: str

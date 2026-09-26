@@ -19,3 +19,13 @@ IDEMPOTENCY_KEY_MAX_LENGTH = 255
 # being hashed on every login attempt.
 PASSWORD_MIN_LENGTH = 8
 PASSWORD_MAX_LENGTH = 128
+
+PRODUCT_DESCRIPTION_MAX_LENGTH = 5000
+# ₹10,00,000 (in paise). A typo guard: nothing in this shop costs more, and it keeps totals far from overflow.
+MAX_PRICE_PAISE = 100_000_000
+# Initial stock / admin adjustments above this are almost certainly typos.
+MAX_STOCK_QUANTITY = 1_000_000
+
+DEFAULT_PAGE_SIZE = 20
+MAX_PAGE_SIZE = 100
+SEARCH_QUERY_MAX_LENGTH = 100

@@ -36,6 +36,20 @@ def get_current_user(
 CurrentUser = Annotated[User, Depends(get_current_user)]
 
 
+def get_optional_user(
+    db: DbSession,
+    credentials: Annotated[HTTPAuthorizationCredentials | None, Depends(_bearer_scheme)],
+) -> User | None:
+    """For public endpoints that show admins more. No token → anonymous; a *bad* token is still a 401,
+    so a client with an expired token finds out instead of silently seeing the public view."""
+    if credentials is None:
+        return None
+    return get_current_user(db, credentials)
+
+
+OptionalUser = Annotated[User | None, Depends(get_optional_user)]
+
+
 def require_admin(user: CurrentUser) -> User:
     if user.role != Role.ADMIN:
         raise ForbiddenError("Admin access required")
