@@ -16,3 +16,6 @@ dist/
 .idea/
 .DS_Store
 Thumbs.db
+
+# Private working notes (design notes, interview prep, references): kept locally, not published
+docs/*.md
