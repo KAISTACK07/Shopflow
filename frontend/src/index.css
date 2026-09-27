@@ -1,0 +1,46 @@
+@import "tailwindcss";
+
+/* Design tokens. Palette from Indian textile dyes: indigo carries the brand and normal stock, turmeric marks
+   low stock, madder marks sold out and errors. Those three are the only colours that mean something. */
+@theme {
+  --color-ink: #1f2a55;
+  --color-indigo: #2e4aa8;
+  --color-indigo-dark: #233a86;
+  --color-turmeric: #c98f00;
+  --color-madder: #b3261e;
+  --color-slate: #5b6475;
+  --color-rule: #d5d9e3;
+  --color-page: #eef0f5;
+  --color-surface: #ffffff;
+
+  --font-sans: "Archivo", system-ui, sans-serif;
+  --radius-control: 4px;
+}
+
+@layer base {
+  body {
+    background: var(--color-page);
+    color: var(--color-ink);
+    font-family: var(--font-sans);
+    line-height: 1.5;
+  }
+  h1,
+  h2 {
+    font-stretch: 75%;
+    font-weight: 800;
+    line-height: 1.1;
+    letter-spacing: -0.01em;
+  }
+  :focus-visible {
+    outline: 2px solid var(--color-indigo);
+    outline-offset: 2px;
+  }
+}
+
+/* Condensed, heavy numerals: the stock count is the one loud element on the page. */
+@utility font-numeral {
+  font-stretch: 62%;
+  font-weight: 800;
+  font-variant-numeric: tabular-nums;
+  line-height: 1;
+}
