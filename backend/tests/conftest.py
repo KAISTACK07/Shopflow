@@ -1,4 +1,4 @@
-"""Test setup: a separate `<db>_test` database on the same PostgreSQL server, migrated with Alembic."""
+"""Test setup: a separate `<db>_test` PostgreSQL database (migrated with Alembic) and a separate Redis DB index."""
 
 import os
 from collections.abc import Iterator
@@ -21,9 +21,18 @@ def _test_database_url() -> URL:
     return url.set(database=f"{url.database}_test")
 
 
+def _test_redis_url() -> str:
+    """Same Redis server, logical database 15, so tests never touch (or flush) the dev data in database 0.
+    Assumes REDIS_URL ends in /<db-number>, as in .env.example."""
+    base, _, _ = Settings().redis_url.rpartition("/")
+    return f"{base}/{TEST_REDIS_DB}"
+
+
+TEST_REDIS_DB = 15
 TEST_DATABASE_URL = _test_database_url()
-# Must happen before any app module is imported: app.db builds its engine from DATABASE_URL at import time.
+# Must happen before any app module is imported: app.db and app.core.redis build their clients at import time.
 os.environ["DATABASE_URL"] = TEST_DATABASE_URL.render_as_string(hide_password=False)
+os.environ["REDIS_URL"] = _test_redis_url()
 
 from fastapi.testclient import TestClient  # noqa: E402
 from redis import RedisError  # noqa: E402
@@ -78,6 +87,16 @@ def _clean_tables() -> Iterator[None]:
     table_names = ", ".join(table.name for table in Base.metadata.sorted_tables)
     with engine.begin() as conn:
         conn.execute(text(f"TRUNCATE {table_names} RESTART IDENTITY CASCADE"))
+
+
+@pytest.fixture(autouse=True)
+def _clean_redis() -> Iterator[None]:
+    """Rate-limit counters must not leak from one test into the next."""
+    yield
+    try:
+        redis_client.flushdb()  # only the test DB index (see _test_redis_url)
+    except RedisError:
+        pass  # Redis not running: nothing to clean, and Redis-dependent tests are skipped anyway
 
 
 @pytest.fixture

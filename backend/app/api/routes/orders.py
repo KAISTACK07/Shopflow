@@ -3,10 +3,10 @@
 import re
 from typing import Annotated
 
-from fastapi import APIRouter, Header, Query, status
+from fastapi import APIRouter, Depends, Header, Query, status
 from fastapi.responses import JSONResponse
 
-from app.api.deps import AdminUser, CurrentUser, DbSession
+from app.api.deps import AdminUser, CurrentUser, DbSession, enforce_checkout_rate_limit
 from app.constants import DEFAULT_PAGE_SIZE, IDEMPOTENCY_KEY_PATTERN, MAX_PAGE_SIZE
 from app.core.errors import ForbiddenError
 from app.models import Role
@@ -30,7 +30,9 @@ def _validated_idempotency_key(key: str | None) -> str:
     "",
     status_code=status.HTTP_201_CREATED,
     response_model=OrderResponse,
-    responses=error_responses(400, 401, 409, 422),
+    responses=error_responses(400, 401, 409, 422, 429),
+    # Runs before the handler: a rate-limited request never touches the database.
+    dependencies=[Depends(enforce_checkout_rate_limit)],
 )
 def place_order(
     body: PlaceOrderRequest,

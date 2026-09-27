@@ -16,12 +16,16 @@ class AppError(Exception):
     code: str = "BAD_REQUEST"
     headers: dict[str, str] | None = None
 
-    def __init__(self, message: str, details: Any = None, *, code: str | None = None) -> None:
+    def __init__(
+        self, message: str, details: Any = None, *, code: str | None = None, headers: dict[str, str] | None = None
+    ) -> None:
         super().__init__(message)
         self.message = message
         self.details = details
         if code is not None:
             self.code = code
+        if headers is not None:
+            self.headers = headers
 
 
 class UnauthorizedError(AppError):
@@ -44,6 +48,11 @@ class NotFoundError(AppError):
 class ConflictError(AppError):
     status_code = HTTPStatus.CONFLICT
     code = "CONFLICT"
+
+
+class RateLimitedError(AppError):
+    status_code = HTTPStatus.TOO_MANY_REQUESTS
+    code = "RATE_LIMITED"
 
 
 def error_response(

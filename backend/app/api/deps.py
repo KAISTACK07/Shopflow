@@ -1,15 +1,20 @@
 """Shared FastAPI dependencies: DB session, current user, admin guard."""
 
+import logging
 from typing import Annotated
 
 from fastapi import Depends
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
+from redis import RedisError
 from sqlalchemy.orm import Session
 
-from app.core.errors import ForbiddenError, UnauthorizedError
+from app.core.errors import ForbiddenError, RateLimitedError, UnauthorizedError
+from app.core.rate_limit import checkout_limiter
 from app.core.security import decode_access_token
 from app.db import get_db
 from app.models import Role, User
+
+logger = logging.getLogger(__name__)
 
 DbSession = Annotated[Session, Depends(get_db)]
 
@@ -48,6 +53,26 @@ def get_optional_user(
 
 
 OptionalUser = Annotated[User | None, Depends(get_optional_user)]
+
+
+def enforce_checkout_rate_limit(user: CurrentUser) -> None:
+    """429 when the user has used up this window's checkout attempts.
+
+    Fails OPEN: if Redis is down we let the request through and log a warning. Rate limiting protects
+    capacity, not correctness (row locks already prevent overselling), so a Redis outage shouldn't turn into
+    a checkout outage.
+    """
+    try:
+        decision = checkout_limiter.hit(str(user.id))
+    except RedisError:
+        logger.warning("rate limiter unavailable, allowing request (fail open)", extra={"user_id": user.id})
+        return
+    if not decision.allowed:
+        raise RateLimitedError(
+            f"Too many checkout attempts; try again in {decision.retry_after_seconds} seconds",
+            details={"limit": decision.limit, "retry_after_seconds": decision.retry_after_seconds},
+            headers={"Retry-After": str(decision.retry_after_seconds)},
+        )
 
 
 def require_admin(user: CurrentUser) -> User:

@@ -31,6 +31,10 @@ class Settings(BaseSettings):
     # (phase 10), so every request would otherwise wait this long.
     redis_timeout_seconds: float = 0.5
 
+    # Per-user checkout rate limit (fixed window in Redis). Counts every POST /api/orders attempt, retries included.
+    checkout_rate_limit: int = Field(default=10, gt=0)
+    checkout_rate_limit_window_seconds: int = Field(default=60, gt=0)
+
     # SecretStr: never shows up in logs, reprs or tracebacks by accident.
     jwt_secret: SecretStr = Field(min_length=JWT_SECRET_MIN_LENGTH)
     jwt_algorithm: str = "HS256"
