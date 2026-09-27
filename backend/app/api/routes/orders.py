@@ -1,31 +1,57 @@
 """Checkout, order history, cancel, and admin status changes."""
 
+import re
 from typing import Annotated
 
-from fastapi import APIRouter, Query, status
+from fastapi import APIRouter, Header, Query, status
+from fastapi.responses import JSONResponse
 
 from app.api.deps import AdminUser, CurrentUser, DbSession
-from app.constants import DEFAULT_PAGE_SIZE, MAX_PAGE_SIZE
+from app.constants import DEFAULT_PAGE_SIZE, IDEMPOTENCY_KEY_PATTERN, MAX_PAGE_SIZE
 from app.core.errors import ForbiddenError
 from app.models import Role
 from app.schemas.common import Page, error_responses
 from app.schemas.order import OrderResponse, PlaceOrderRequest, UpdateOrderStatus
 from app.services import order_service
+from app.services.idempotency_service import IdempotencyKeyRequiredError, InvalidIdempotencyKeyError
 
 router = APIRouter(prefix="/orders", tags=["orders"])
+
+
+def _validated_idempotency_key(key: str | None) -> str:
+    if key is None:
+        raise IdempotencyKeyRequiredError("The Idempotency-Key header is required; send a new UUID per checkout")
+    if not re.fullmatch(IDEMPOTENCY_KEY_PATTERN, key):
+        raise InvalidIdempotencyKeyError("Idempotency-Key must be 8-255 characters of A-Z a-z 0-9 . _ : -")
+    return key
 
 
 @router.post(
     "",
     status_code=status.HTTP_201_CREATED,
     response_model=OrderResponse,
-    responses=error_responses(401, 409, 422),
+    responses=error_responses(400, 401, 409, 422),
 )
-def place_order(body: PlaceOrderRequest, db: DbSession, user: CurrentUser) -> OrderResponse:
+def place_order(
+    body: PlaceOrderRequest,
+    db: DbSession,
+    user: CurrentUser,
+    idempotency_key: Annotated[
+        str | None,
+        Header(alias="Idempotency-Key", description="Required. A new UUID per checkout; reuse it only to retry."),
+    ] = None,
+) -> JSONResponse:
     """Checkout: turns the whole cart into an order and reserves the stock, all-or-nothing.
-    409 `INSUFFICIENT_STOCK` lists every item that can't be ordered; 409 `CART_EMPTY` if there is nothing to buy."""
-    order = order_service.place_order(db, user, body.shipping_address)
-    return OrderResponse.from_order(order)
+
+    - Same key + same body again → the original 201 response (no new order), with `Idempotent-Replayed: true`.
+    - Same key + different body → 409 `IDEMPOTENCY_KEY_REUSED`.
+    - 409 `INSUFFICIENT_STOCK` lists every item that can't be ordered; 409 `CART_EMPTY` if there is nothing to buy.
+      Failed checkouts don't consume the key, so the same key can be retried.
+    """
+    key = _validated_idempotency_key(idempotency_key)
+    result = order_service.checkout(db, user, body, key)
+    headers = {"Idempotent-Replayed": "true"} if result.replayed else None
+    return JSONResponse(status_code=result.status_code, content=result.body, headers=headers)
 
 
 @router.get("", response_model=Page[OrderResponse], responses=error_responses(401, 403, 422))

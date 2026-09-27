@@ -1,4 +1,5 @@
 from collections import Counter
+from uuid import uuid4
 
 import pytest
 from fastapi.testclient import TestClient
@@ -6,6 +7,7 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.models import CartItem, Inventory, InventoryMovement, Order, OrderItem, User
+from app.schemas.order import PlaceOrderRequest
 from app.services import cart_service, order_service
 from app.services.auth_service import register_user
 from tests.concurrency import run_concurrently
@@ -21,7 +23,16 @@ def add_to_cart(client: TestClient, headers: dict[str, str], product_id: int, qu
 
 
 def checkout(client: TestClient, headers: dict[str, str], address: str = ADDRESS):
-    return client.post("/api/orders", json={"shipping_address": address}, headers=headers)
+    """A new checkout (fresh idempotency key each call)."""
+    return client.post(
+        "/api/orders", json={"shipping_address": address}, headers={**headers, "Idempotency-Key": str(uuid4())}
+    )
+
+
+def place(session: Session, user_id: int) -> object:
+    """Service-level checkout for concurrency tests, each call with its own idempotency key."""
+    request = PlaceOrderRequest(shipping_address=ADDRESS)
+    return order_service.checkout(session, session.get(User, user_id), request, str(uuid4()))
 
 
 def stock_of(db: Session, product_id: int) -> int:
@@ -320,7 +331,7 @@ def test_fifteen_buyers_five_units_exactly_five_orders(client: TestClient, db: S
         cart_service.add_item(db, buyer, product_id, 1)
 
     results = run_concurrently(
-        [lambda s, b=buyer: order_service.place_order(s, s.get(User, b.id), ADDRESS) for buyer in buyers]
+        [lambda s, b=buyer: place(s, b.id) for buyer in buyers]
     )
 
     assert Counter(results) == {"ok": 5, "INSUFFICIENT_STOCK": 10}
@@ -336,7 +347,7 @@ def test_same_cart_checked_out_twice_at_once_gives_one_order(
     cart_service.add_item(db, customer, product_id, 2)
 
     results = run_concurrently(
-        [lambda s: order_service.place_order(s, s.get(User, customer.id), ADDRESS) for _ in range(5)]
+        [lambda s: place(s, customer.id) for _ in range(5)]
     )
 
     assert Counter(results) == {"ok": 1, "CART_EMPTY": 4}
@@ -371,7 +382,7 @@ def test_checkout_and_cart_edits_racing_never_deadlock(
         outcomes.update(
             run_concurrently(
                 [
-                    lambda s, b=buyer: order_service.place_order(s, s.get(User, b.id), ADDRESS),
+                    lambda s, b=buyer: place(s, b.id),
                     lambda s, b=buyer: cart_service.set_item_quantity(s, s.get(User, b.id), product_id, 2),
                 ]
             )

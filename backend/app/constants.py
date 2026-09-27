@@ -14,6 +14,8 @@ MAX_CART_ITEM_QUANTITY = 100
 DEFAULT_LOW_STOCK_THRESHOLD = 5
 
 IDEMPOTENCY_KEY_MAX_LENGTH = 255
+# Clients should send a UUID. At least 8 safe characters, so keys like "1" can't collide by accident.
+IDEMPOTENCY_KEY_PATTERN = r"^[A-Za-z0-9._:-]{8,255}$"
 
 # Length only, no "must contain a symbol" rules (NIST SP 800-63B). The max stops huge inputs from
 # being hashed on every login attempt.

@@ -1,15 +1,22 @@
 """Placing, reading, cancelling orders and moving them through their statuses.
 
 Lock order used everywhere (so no two transactions can wait on each other in a cycle):
-    carts row → cart_items → inventory rows (sorted by product_id)      [checkout, cart edits]
+    idempotency key → carts row → cart_items → inventory rows (sorted)  [checkout]
+    carts row → cart_items                                              [cart edits]
     orders row → inventory rows (sorted by product_id)                  [cancel]
 """
+
+from dataclasses import dataclass
+from http import HTTPStatus
+from typing import Any
 
 from sqlalchemy import delete, func, select
 from sqlalchemy.orm import Session, joinedload, selectinload
 
 from app.core.errors import ConflictError, NotFoundError
 from app.models import Cart, CartItem, Inventory, MovementReason, Order, OrderItem, OrderStatus, Role, User
+from app.schemas.order import OrderResponse, PlaceOrderRequest
+from app.services import idempotency_service
 from app.services.inventory_service import InsufficientStockError, apply_stock_change, lock_inventory
 
 
@@ -42,51 +49,78 @@ def _order_query():
 # --- placing an order ---------------------------------------------------------------------------
 
 
-def place_order(db: Session, user: User, shipping_address: str) -> Order:
-    """Turn the user's cart into an order in ONE transaction: all of it happens, or none of it does."""
+@dataclass(frozen=True)
+class CheckoutResult:
+    status_code: int
+    body: dict[str, Any]
+    replayed: bool  # True when this is a retry answered from the stored response
+
+
+def checkout(db: Session, user: User, request: PlaceOrderRequest, idempotency_key: str) -> CheckoutResult:
+    """Idempotent checkout: claim the key, place the order, store the response, all in ONE transaction.
+
+    Lock order: idempotency key (unique index) → carts row → cart_items → inventory (sorted).
+    """
+    request_hash = idempotency_service.fingerprint(request.model_dump(mode="json"))
     try:
-        # 1. Lock the cart row. A second checkout of the same cart (another tab, a double click) waits here,
-        #    then finds the cart empty, so one cart can never become two orders.
-        cart = db.scalar(select(Cart).where(Cart.user_id == user.id).with_for_update())
-        items = _load_cart_items(db, cart)
-        if not items:
-            raise CartEmptyError("Your cart is empty")
+        stored = idempotency_service.claim_or_replay(db, user.id, idempotency_key, request_hash)
+        if stored is not None:
+            db.rollback()  # nothing to write; just end the transaction
+            return CheckoutResult(stored.status_code, stored.body, replayed=True)
 
-        # 2. Lock the inventory rows, sorted by product_id (deadlock-free), and re-check stock *after*
-        #    getting the locks. Nobody else can change these quantities until we commit.
-        stock = lock_inventory(db, [item.product_id for item in items])
-        _ensure_all_available(items, stock)
-
-        # 3. Create the order, freezing today's prices into the order items.
-        order = Order(
-            user_id=user.id,
-            status=OrderStatus.PENDING,
-            shipping_address=shipping_address,
-            total_paise=sum(item.product.price_paise * item.quantity for item in items),
-        )
-        db.add(order)
-        db.flush()  # assigns order.id for the items and movements
-        for item in items:
-            db.add(
-                OrderItem(
-                    order_id=order.id,
-                    product_id=item.product_id,
-                    quantity=item.quantity,
-                    unit_price_paise=item.product.price_paise,
-                )
-            )
-            # 4. Decrement stock and write the ledger row (never below zero; DB CHECK as a backstop).
-            apply_stock_change(
-                db, stock[item.product_id], -item.quantity, MovementReason.ORDER,
-                actor_user_id=user.id, order_id=order.id,
-            )
-
-        # 5. Empty the cart, then commit everything at once.
-        db.execute(delete(CartItem).where(CartItem.cart_id == cart.id))
-        db.commit()
+        order = _create_order_from_cart(db, user, request.shipping_address)
+        # The stored response is exactly the API response, so a retry gets byte-for-byte the same order.
+        body = OrderResponse.from_order(order).model_dump(mode="json")
+        idempotency_service.save_response(db, user.id, idempotency_key, HTTPStatus.CREATED, body)
+        db.commit()  # key + order + stock changes + emptied cart + stored response, all at once
     except Exception:
-        db.rollback()  # undo everything and release all row locks
+        # Undo everything (including the key row, so the client can retry with the same key) and release locks.
+        db.rollback()
         raise
+    return CheckoutResult(HTTPStatus.CREATED, body, replayed=False)
+
+
+def _create_order_from_cart(db: Session, user: User, shipping_address: str) -> Order:
+    """Turn the user's cart into an order. Does NOT commit: the caller owns the transaction."""
+    # 1. Lock the cart row. A second checkout of the same cart (another tab, a double click with a different
+    #    key) waits here, then finds the cart empty, so one cart can never become two orders.
+    cart = db.scalar(select(Cart).where(Cart.user_id == user.id).with_for_update())
+    items = _load_cart_items(db, cart)
+    if not items:
+        raise CartEmptyError("Your cart is empty")
+
+    # 2. Lock the inventory rows, sorted by product_id (deadlock-free), and re-check stock *after*
+    #    getting the locks. Nobody else can change these quantities until we commit.
+    stock = lock_inventory(db, [item.product_id for item in items])
+    _ensure_all_available(items, stock)
+
+    # 3. Create the order, freezing today's prices into the order items.
+    order = Order(
+        user_id=user.id,
+        status=OrderStatus.PENDING,
+        shipping_address=shipping_address,
+        total_paise=sum(item.product.price_paise * item.quantity for item in items),
+    )
+    db.add(order)
+    db.flush()  # assigns order.id for the items and movements
+    for item in items:
+        db.add(
+            OrderItem(
+                order_id=order.id,
+                product_id=item.product_id,
+                quantity=item.quantity,
+                unit_price_paise=item.product.price_paise,
+            )
+        )
+        # 4. Decrement stock and write the ledger row (never below zero; DB CHECK as a backstop).
+        apply_stock_change(
+            db, stock[item.product_id], -item.quantity, MovementReason.ORDER,
+            actor_user_id=user.id, order_id=order.id,
+        )
+
+    # 5. Empty the cart. Re-read the order (still inside the transaction) with its items for the response.
+    db.execute(delete(CartItem).where(CartItem.cart_id == cart.id))
+    db.flush()
     return get_order(db, user, order.id)
 
 
