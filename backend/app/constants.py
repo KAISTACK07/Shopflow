@@ -35,3 +35,7 @@ SEARCH_QUERY_MAX_LENGTH = 100
 MOVEMENT_NOTE_MAX_LENGTH = 500
 
 SHIPPING_ADDRESS_MAX_LENGTH = 500
+
+# Advisory lock id for migrations: every backend instance takes it before migrating, so concurrent starts take
+# turns instead of racing to create the same tables. Any fixed 64-bit number works; it only has to be shared.
+MIGRATION_ADVISORY_LOCK_ID = 7_415_220_031

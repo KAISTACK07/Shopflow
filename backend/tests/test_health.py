@@ -104,6 +104,23 @@ def test_unhandled_exception_returns_generic_500_without_traceback() -> None:
     assert "X-Request-ID" in response.headers
 
 
+@requires_redis
+def test_passing_health_probes_are_logged_at_debug_other_requests_at_info(client: TestClient, caplog) -> None:
+    with caplog.at_level(logging.DEBUG, logger="shopflow.request"):
+        client.get("/api/health")
+        client.get("/api/products")
+
+    levels = {record.path: record.levelname for record in caplog.records if record.name == "shopflow.request"}
+    assert levels == {"/api/health": "DEBUG", "/api/products": "INFO"}
+
+
+def test_uvicorn_color_message_is_not_logged() -> None:
+    record = logging.LogRecord("uvicorn.error", logging.INFO, __file__, 1, "Started server process", None, None)
+    record.color_message = "Started server process [\x1b[36m1\x1b[0m]"
+
+    assert "color_message" not in json.loads(JsonFormatter().format(record))
+
+
 def test_json_formatter_includes_extra_fields() -> None:
     record = logging.LogRecord("shopflow.test", logging.INFO, __file__, 1, "request", None, None)
     record.status = 201

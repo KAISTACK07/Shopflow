@@ -14,6 +14,7 @@ from app.core.logging import request_id_var
 logger = logging.getLogger("shopflow.request")
 
 REQUEST_ID_HEADER = "X-Request-ID"
+HEALTH_PATH = "/api/health"
 # Accept a caller's id only if it is short and harmless; otherwise generate our own.
 _VALID_REQUEST_ID = re.compile(r"^[A-Za-z0-9._-]{1,64}$")
 
@@ -34,7 +35,11 @@ async def request_context_middleware(
 
     latency_ms = round((time.perf_counter() - started) * 1000, 2)
     response.headers[REQUEST_ID_HEADER] = request_id
-    logger.info(
+    # Docker probes /api/health every few seconds; logging each passing probe at INFO would bury real traffic
+    # (~17,000 lines a day per container). A failing probe is still logged at INFO.
+    passing_probe = request.url.path == HEALTH_PATH and response.status_code == 200
+    logger.log(
+        logging.DEBUG if passing_probe else logging.INFO,
         "request",
         extra={
             "method": request.method,

@@ -1,0 +1,9 @@
+# Only what the image needs: requirements, alembic, app/. Tests run on the host against the compose database.
+.venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.coverage
+htmlcov/
+tests/
+requirements-dev.txt

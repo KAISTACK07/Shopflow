@@ -1,4 +1,7 @@
-# Phase 2: infrastructure only. The backend and frontend services are added in phase 13.
+# The whole stack: `docker compose up --build`, then open http://localhost:8080 (API docs: http://localhost:8000/docs).
+# Values come from .env (copy .env.example first). Start order is enforced with health checks:
+# postgres + redis healthy → backend (migrates, seeds, serves) healthy → frontend.
+
 services:
   postgres:
     image: postgres:16-alpine
@@ -7,7 +10,7 @@ services:
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
       POSTGRES_DB: ${POSTGRES_DB}
     ports:
-      - "${POSTGRES_HOST_PORT}:5432"
+      - "${POSTGRES_HOST_PORT:-5433}:5432"
     volumes:
       - postgres-data:/var/lib/postgresql/data
     healthcheck:
@@ -19,9 +22,58 @@ services:
   redis:
     image: redis:7-alpine
     ports:
-      - "${REDIS_HOST_PORT}:6379"
+      - "${REDIS_HOST_PORT:-6379}:6379"
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  backend:
+    build: ./backend
+    # Listed explicitly (no env_file), so it's clear what the container gets. Inside the compose network the
+    # database and Redis are reached by service name, not via the host ports.
+    environment:
+      DATABASE_URL: postgresql+psycopg://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
+      REDIS_URL: redis://redis:6379/0
+      JWT_SECRET: ${JWT_SECRET:?JWT_SECRET is not set. Copy .env.example to .env and fill it in}
+      JWT_ALGORITHM: ${JWT_ALGORITHM:-HS256}
+      ACCESS_TOKEN_EXPIRE_MINUTES: ${ACCESS_TOKEN_EXPIRE_MINUTES:-30}
+      APP_NAME: ${APP_NAME:-ShopFlow API}
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      CHECKOUT_RATE_LIMIT: ${CHECKOUT_RATE_LIMIT:-10}
+      CHECKOUT_RATE_LIMIT_WINDOW_SECONDS: ${CHECKOUT_RATE_LIMIT_WINDOW_SECONDS:-60}
+      DB_POOL_SIZE: ${DB_POOL_SIZE:-10}
+      DB_MAX_OVERFLOW: ${DB_MAX_OVERFLOW:-10}
+      DB_CONNECT_TIMEOUT_SECONDS: ${DB_CONNECT_TIMEOUT_SECONDS:-3}
+      REDIS_TIMEOUT_SECONDS: ${REDIS_TIMEOUT_SECONDS:-0.5}
+      SEED_DEMO_DATA: ${SEED_DEMO_DATA:-false}
+      SEED_ADMIN_EMAIL: ${SEED_ADMIN_EMAIL:-admin@example.com}
+      SEED_ADMIN_PASSWORD: ${SEED_ADMIN_PASSWORD:-}
+    ports:
+      - "${BACKEND_HOST_PORT:-8000}:8000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      # The slim image has no curl. /api/health is 503 when the database is down, which urlopen raises on.
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/api/health', timeout=3)"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 20s
+
+  frontend:
+    build: ./frontend
+    ports:
+      - "${FRONTEND_HOST_PORT:-8080}:80"
+    depends_on:
+      backend:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1/"]
       interval: 5s
       timeout: 3s
       retries: 10

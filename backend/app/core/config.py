@@ -40,6 +40,11 @@ class Settings(BaseSettings):
     jwt_algorithm: str = "HS256"
     access_token_expire_minutes: int = Field(default=30, gt=0)
 
+    # Demo data for `python -m app.seed`. The admin account is only created when a real password is set;
+    # the seed checks it (not a validator here), so a missing demo password never stops the API from starting.
+    seed_admin_email: str = "admin@example.com"
+    seed_admin_password: SecretStr | None = None
+
     @field_validator("jwt_secret")
     @classmethod
     def _reject_example_secret(cls, value: SecretStr) -> SecretStr:

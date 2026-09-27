@@ -1,7 +1,33 @@
+import logging
+import re
+from pathlib import Path
+
 import pytest
 from pydantic import ValidationError
 
 from app.core.config import Settings
+from app.core.logging import configure_logging
+
+ENV_EXAMPLE = Path(__file__).resolve().parents[2] / ".env.example"
+
+
+def test_env_example_documents_every_setting() -> None:
+    """Every Settings field must appear in .env.example, so a new setting can't be added silently."""
+    documented = set(re.findall(r"^([A-Z][A-Z0-9_]*)=", ENV_EXAMPLE.read_text(), flags=re.MULTILINE))
+
+    missing = {name.upper() for name in Settings.model_fields} - documented
+
+    assert missing == set(), f"add these to .env.example: {sorted(missing)}"
+
+
+def test_uvicorn_messages_go_through_the_json_handler() -> None:
+    """In a container every log line should be JSON, including uvicorn's own startup and error messages."""
+    configure_logging("INFO")
+
+    uvicorn_logger = logging.getLogger("uvicorn")
+
+    assert uvicorn_logger.handlers == []
+    assert uvicorn_logger.propagate is True
 
 
 @pytest.mark.parametrize(

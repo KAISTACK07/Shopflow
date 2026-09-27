@@ -20,8 +20,9 @@ class SkuAlreadyExistsError(ConflictError):
     code = "SKU_ALREADY_EXISTS"
 
 
-def create_product(db: Session, data: ProductCreate, actor: User) -> Product:
-    """Product, its inventory row and (if stocked) the first ledger entry, all in one transaction."""
+def create_product(db: Session, data: ProductCreate, actor: User | None) -> Product:
+    """Product, its inventory row and (if stocked) the first ledger entry, all in one transaction.
+    `actor` is the admin doing it, or None for system-created data (the seed script)."""
     inventory = Inventory(quantity=data.initial_stock)
     if data.low_stock_threshold is not None:
         inventory.low_stock_threshold = data.low_stock_threshold
@@ -43,7 +44,7 @@ def create_product(db: Session, data: ProductCreate, actor: User) -> Product:
                     product_id=product.id,
                     delta=data.initial_stock,
                     reason=MovementReason.RESTOCK,
-                    actor_user_id=actor.id,
+                    actor_user_id=actor.id if actor else None,
                     note="initial stock",
                 )
             )
