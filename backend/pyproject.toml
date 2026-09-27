@@ -6,3 +6,6 @@ requires-python = ">=3.12"
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "-ra"
+markers = [
+    "concurrency: tests that run many threads/requests at once (select with -m concurrency)",
+]

@@ -166,6 +166,7 @@ def test_failed_checkout_does_not_store_the_key(
 DUPLICATES = 10
 
 
+@pytest.mark.concurrency
 def test_simultaneous_duplicates_create_exactly_one_order(
     client: TestClient, db: Session, customer: User, product: dict
 ) -> None:

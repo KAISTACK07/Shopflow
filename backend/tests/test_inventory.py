@@ -151,6 +151,7 @@ CONCURRENT_WORKERS = 16
 STARTING_STOCK = 10
 
 
+@pytest.mark.concurrency
 def test_concurrent_removals_never_oversell_or_lose_updates(
     client: TestClient, db: Session, admin: User, admin_headers: dict[str, str]
 ) -> None:

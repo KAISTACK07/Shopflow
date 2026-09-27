@@ -324,6 +324,7 @@ def make_buyers(db: Session, how_many: int) -> list[User]:
     return buyers
 
 
+@pytest.mark.concurrency
 def test_fifteen_buyers_five_units_exactly_five_orders(client: TestClient, db: Session, admin_headers) -> None:
     product_id = create_product(client, admin_headers, initial_stock=5)["id"]
     buyers = make_buyers(db, 15)
@@ -340,6 +341,7 @@ def test_fifteen_buyers_five_units_exactly_five_orders(client: TestClient, db: S
     assert ledger_sum(db, product_id) == 0
 
 
+@pytest.mark.concurrency
 def test_same_cart_checked_out_twice_at_once_gives_one_order(
     client: TestClient, db: Session, customer: User, admin_headers
 ) -> None:
@@ -355,6 +357,7 @@ def test_same_cart_checked_out_twice_at_once_gives_one_order(
     assert stock_of(db, product_id) == 8
 
 
+@pytest.mark.concurrency
 def test_parallel_cancels_return_stock_once(
     client: TestClient, db: Session, customer: User, placed_order: dict
 ) -> None:
@@ -368,6 +371,7 @@ def test_parallel_cancels_return_stock_once(
     assert stock_of(db, placed_order["items"][0]["product_id"]) == 10
 
 
+@pytest.mark.concurrency
 def test_checkout_and_cart_edits_racing_never_deadlock(
     client: TestClient, db: Session, admin_headers
 ) -> None:

@@ -155,6 +155,21 @@ def test_set_quantity_checks_stock_and_membership(
     assert zero.status_code == 422  # removing is DELETE's job
 
 
+def test_cannot_change_quantity_of_deactivated_product(
+    client: TestClient, admin_headers: dict[str, str], customer_headers: dict[str, str]
+) -> None:
+    product = create_product(client, admin_headers)
+    add(client, customer_headers, product["id"], 1)
+    client.delete(f"/api/products/{product['id']}", headers=admin_headers)
+
+    response = client.patch(f"/api/cart/items/{product['id']}", json={"quantity": 2}, headers=customer_headers)
+    removal = client.delete(f"/api/cart/items/{product['id']}", headers=customer_headers)
+
+    assert response.status_code == 409
+    assert response.json()["error"]["code"] == "PRODUCT_UNAVAILABLE"
+    assert removal.status_code == 200  # but it can always be removed
+
+
 def test_remove_item(client: TestClient, admin_headers: dict[str, str], customer_headers: dict[str, str]) -> None:
     product = create_product(client, admin_headers)
     add(client, customer_headers, product["id"], 2)
@@ -218,6 +233,7 @@ def test_carts_are_private(client: TestClient, db: Session, admin_headers, custo
 PARALLEL_CLICKS = 10
 
 
+@pytest.mark.concurrency
 def test_parallel_adds_of_same_product_are_all_counted(
     client: TestClient, db: Session, customer: User, admin_headers: dict[str, str]
 ) -> None:

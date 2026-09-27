@@ -1,10 +1,14 @@
 """Test setup: a separate `<db>_test` PostgreSQL database (migrated with Alembic) and a separate Redis DB index."""
 
 import os
+import socket
+import threading
+import time
 from collections.abc import Iterator
 from pathlib import Path
 
 import pytest
+import uvicorn
 from alembic import command
 from alembic.config import Config
 from sqlalchemy import create_engine, text
@@ -45,6 +49,7 @@ from app.models import Base, Role, User  # noqa: E402
 from app.services.auth_service import register_user  # noqa: E402
 
 CUSTOMER_PASSWORD = "customer-pass-123"
+LIVE_SERVER_START_TIMEOUT_SECONDS = 10
 ADMIN_PASSWORD = "admin-pass-123"
 
 
@@ -109,6 +114,26 @@ def db() -> Iterator[Session]:
 def client() -> Iterator[TestClient]:
     with TestClient(app) as test_client:
         yield test_client
+
+
+@pytest.fixture(scope="session")
+def live_server() -> Iterator[str]:
+    """The real app served by uvicorn on a free port, in a background thread, for tests that need genuine
+    concurrent HTTP requests (TestClient runs requests in-process, not as a real server)."""
+    with socket.socket() as sock:
+        sock.bind(("127.0.0.1", 0))
+        port = sock.getsockname()[1]
+    server = uvicorn.Server(uvicorn.Config(app, host="127.0.0.1", port=port, log_level="warning", lifespan="off"))
+    thread = threading.Thread(target=server.run, daemon=True)
+    thread.start()
+    deadline = time.monotonic() + LIVE_SERVER_START_TIMEOUT_SECONDS
+    while not server.started:
+        if time.monotonic() > deadline:
+            raise RuntimeError("live test server did not start")
+        time.sleep(0.05)
+    yield f"http://127.0.0.1:{port}"
+    server.should_exit = True
+    thread.join(timeout=LIVE_SERVER_START_TIMEOUT_SECONDS)
 
 
 def auth_headers(user: User) -> dict[str, str]:

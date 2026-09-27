@@ -78,6 +78,7 @@ def test_identifiers_are_counted_separately() -> None:
     assert rl.hit("bob").allowed
 
 
+@pytest.mark.concurrency
 @requires_redis
 def test_concurrent_hits_are_counted_exactly() -> None:
     """30 threads hit a limit of 10 at the same moment: INCR is atomic, so exactly 10 are allowed.

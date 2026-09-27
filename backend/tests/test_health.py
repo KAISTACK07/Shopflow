@@ -1,15 +1,20 @@
 import json
 import logging
+from collections.abc import Iterator
 
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from redis import RedisError
+from sqlalchemy import create_engine
+from sqlalchemy.orm import Session
 
 from app.api.routes import health as health_module
 from app.core.errors import register_exception_handlers
 from app.core.logging import JsonFormatter
 from app.core.middleware import request_context_middleware
+from app.db import get_db
+from app.main import app
 from tests.conftest import requires_redis
 
 
@@ -31,6 +36,26 @@ def test_health_degraded_when_redis_is_down(client: TestClient, monkeypatch: pyt
 
     assert response.status_code == 200
     assert response.json() == {"status": "degraded", "checks": {"database": "ok", "redis": "down"}}
+
+
+def test_health_is_503_when_database_is_down(client: TestClient) -> None:
+    """Swap in a session bound to a PostgreSQL that isn't there (port 1): the real driver error path."""
+    dead_engine = create_engine("postgresql+psycopg://nobody@127.0.0.1:1/none", connect_args={"connect_timeout": 1})
+
+    def unreachable_db() -> Iterator[Session]:
+        with Session(dead_engine) as session:
+            yield session
+
+    app.dependency_overrides[get_db] = unreachable_db
+    try:
+        response = client.get("/api/health")
+    finally:
+        app.dependency_overrides.clear()
+        dead_engine.dispose()
+
+    assert response.status_code == 503
+    assert response.json()["status"] == "unavailable"
+    assert response.json()["checks"]["database"] == "down"
 
 
 def test_response_carries_generated_request_id(client: TestClient) -> None:

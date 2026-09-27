@@ -4,6 +4,7 @@ import threading
 from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
 
+import httpx2 as httpx
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
@@ -46,3 +47,26 @@ def run_concurrently(actions: list[Callable[[Session], object]]) -> list[str]:
 
     with ThreadPoolExecutor(max_workers=len(actions)) as pool:
         return list(pool.map(run, actions))
+
+
+HTTP_TIMEOUT_SECONDS = 30
+
+
+def fire_concurrently(
+    base_url: str, requests: list[Callable[[httpx.Client], httpx.Response]]
+) -> list[httpx.Response]:
+    """Send each request from its own thread and HTTP connection to a live server, all at the same moment.
+
+    Unlike `run_concurrently`, this goes through the whole stack: HTTP parsing, auth, rate limiting, the
+    server's threadpool and its connection pool (where extra requests queue, as they would in production).
+    """
+    start_together = threading.Barrier(len(requests), timeout=BARRIER_TIMEOUT_SECONDS)
+
+    def run(send: Callable[[httpx.Client], httpx.Response]) -> httpx.Response:
+        with httpx.Client(base_url=base_url, timeout=HTTP_TIMEOUT_SECONDS) as client:
+            client.get("/api/health")  # open the keep-alive connection before the barrier, for the same reason
+            start_together.wait()
+            return send(client)
+
+    with ThreadPoolExecutor(max_workers=len(requests)) as pool:
+        return list(pool.map(run, requests))
