@@ -22,7 +22,11 @@ SessionLocal = sessionmaker(bind=engine, autoflush=False, expire_on_commit=False
 
 
 def get_db() -> Iterator[Session]:
-    """FastAPI dependency: one session per request, always closed afterwards."""
+    """FastAPI dependency: one session per request, always closed afterwards.
+
+    The session (and its pooled connection) lives until the response has been sent, across several thread-pool
+    hops; app.core.concurrency limits requests in flight to the pool size so that can never stall the server.
+    """
     with SessionLocal() as session:
         yield session
 

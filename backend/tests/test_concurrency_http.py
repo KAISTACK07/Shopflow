@@ -5,6 +5,7 @@ these prove the whole stack under load: auth, rate limiting, idempotency, lockin
 """
 
 import random
+import time
 from collections import Counter
 from itertools import accumulate
 from uuid import uuid4
@@ -25,6 +26,8 @@ from tests.factories import create_product
 pytestmark = [pytest.mark.concurrency, requires_redis]
 
 ADDRESS = "1 Flash Sale Street"
+# Far below the 30 s pool timeout that a stalled server would hit, far above a healthy run (~1-2 s).
+BURST_TIME_LIMIT_SECONDS = 15
 
 
 def make_buyers(db: Session, how_many: int) -> list[User]:
@@ -87,6 +90,28 @@ def test_flash_sale_50_buyers_10_units(live_server: str, client: TestClient, db:
     assert db.scalar(select(func.count(Order.id))) == 10
     assert sold_quantity(db, product_id) == 10
     assert_ledger_consistent(db, product_id)  # never negative at any point
+
+
+BURST = 100  # comfortably more than the server's 40 worker threads + 20 pooled DB connections
+
+
+def test_burst_bigger_than_the_thread_pool_does_not_stall(live_server: str, db: Session) -> None:
+    """Regression test for a stall found by the load test: 500 simultaneous checkouts all timed out.
+
+    FastAPI runs each sync dependency and the endpoint as separate hops on a 40-thread pool. A request that took a
+    DB connection in `get_current_user` kept it while waiting for a thread for its next hop; once every thread was
+    blocked waiting for a connection, nothing could move until SQLAlchemy's 30 s pool timeout (then 500s).
+    """
+    buyers = make_buyers(db, BURST)
+
+    started = time.monotonic()
+    responses = fire_concurrently(
+        live_server, [lambda http, h=bearer(buyer): http.get("/api/cart", headers=h) for buyer in buyers]
+    )
+    elapsed = time.monotonic() - started
+
+    assert Counter(r.status_code for r in responses) == {200: BURST}
+    assert elapsed < BURST_TIME_LIMIT_SECONDS, f"took {elapsed:.1f}s"
 
 
 def test_ten_simultaneous_http_duplicates_create_one_order(

@@ -89,12 +89,18 @@ def _create_order_from_cart(db: Session, user: User, shipping_address: str) -> O
     if not items:
         raise CartEmptyError("Your cart is empty")
 
-    # 2. Lock the inventory rows, sorted by product_id (deadlock-free), and re-check stock *after*
-    #    getting the locks. Nobody else can change these quantities until we commit.
-    stock = lock_inventory(db, [item.product_id for item in items])
-    _ensure_all_available(items, stock)
+    # 2. Sold-out fast path: read stock WITHOUT locking and reject straight away if it's already too low. In a flash
+    #    sale most buyers lose; without this they all queued for the row lock every winner needs, only to be told
+    #    "sold out" (the load test: 400 of 500 requests). It can only reject, never accept, so it can't oversell: a
+    #    restock landing a moment later is the same as this request having arrived a moment earlier.
+    _ensure_all_available(items, _unlocked_stock(db, items))
 
-    # 3. Create the order, freezing today's prices into the order items.
+    # 3. Lock the inventory rows, sorted by product_id (deadlock-free), and check again *under* the locks: this is
+    #    the check that decides. Nobody else can change these quantities until we commit.
+    stock = lock_inventory(db, [item.product_id for item in items])
+    _ensure_all_available(items, {product_id: row.quantity for product_id, row in stock.items()})
+
+    # 4. Create the order, freezing today's prices into the order items.
     order = Order(
         user_id=user.id,
         status=OrderStatus.PENDING,
@@ -112,13 +118,13 @@ def _create_order_from_cart(db: Session, user: User, shipping_address: str) -> O
                 unit_price_paise=item.product.price_paise,
             )
         )
-        # 4. Decrement stock and write the ledger row (never below zero; DB CHECK as a backstop).
+        # 5. Decrement stock and write the ledger row (never below zero; DB CHECK as a backstop).
         apply_stock_change(
             db, stock[item.product_id], -item.quantity, MovementReason.ORDER,
             actor_user_id=user.id, order_id=order.id,
         )
 
-    # 5. Empty the cart. Re-read the order (still inside the transaction) with its items for the response.
+    # 6. Empty the cart. Re-read the order (still inside the transaction) with its items for the response.
     db.execute(delete(CartItem).where(CartItem.cart_id == cart.id))
     db.flush()
     return get_order(db, user, order.id)
@@ -139,11 +145,22 @@ def _load_cart_items(db: Session, cart: Cart | None) -> list[CartItem]:
     )
 
 
-def _ensure_all_available(items: list[CartItem], stock: dict[int, Inventory]) -> None:
-    """Report every problem at once, so the user can fix the whole cart in one go."""
+def _unlocked_stock(db: Session, items: list[CartItem]) -> dict[int, int]:
+    """Current committed stock per product, read without locks. Plain columns, not Inventory objects, so nothing
+    stale is left in the session for the locked read that follows."""
+    rows = db.execute(
+        select(Inventory.product_id, Inventory.quantity).where(
+            Inventory.product_id.in_([item.product_id for item in items])
+        )
+    )
+    return {product_id: quantity for product_id, quantity in rows}
+
+
+def _ensure_all_available(items: list[CartItem], stock: dict[int, int]) -> None:
+    """Report every problem at once, so the user can fix the whole cart in one go. `stock`: product_id -> quantity."""
     problems = []
     for item in items:
-        available = stock[item.product_id].quantity
+        available = stock[item.product_id]
         if not item.product.is_active:
             problems.append(_problem(item, available, "product_unavailable"))
         elif available < item.quantity:

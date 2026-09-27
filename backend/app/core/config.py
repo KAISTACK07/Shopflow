@@ -25,6 +25,8 @@ class Settings(BaseSettings):
     db_pool_size: int = 10
     db_max_overflow: int = 10
     db_connect_timeout_seconds: int = 3
+    # Requests beyond the pool size wait (see app.core.concurrency); after this long they get 503 + Retry-After.
+    request_queue_timeout_seconds: float = Field(default=10, gt=0)
 
     redis_url: str
     # Short on purpose: a healthy Redis answers in well under 1 ms, and when it is down we fail open

@@ -1,3 +1,4 @@
+import threading
 from collections import Counter
 from uuid import uuid4
 
@@ -6,6 +7,7 @@ from fastapi.testclient import TestClient
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
+from app.db import engine
 from app.models import CartItem, Inventory, InventoryMovement, Order, OrderItem, User
 from app.schemas.order import PlaceOrderRequest
 from app.services import cart_service, order_service
@@ -15,6 +17,7 @@ from tests.conftest import auth_headers
 from tests.factories import create_product
 
 ADDRESS = "221B Baker Street, London"
+LOCK_WAIT_LIMIT_SECONDS = 3
 
 
 def add_to_cart(client: TestClient, headers: dict[str, str], product_id: int, quantity: int = 1) -> None:
@@ -125,6 +128,30 @@ def test_insufficient_stock_lists_every_failing_item_and_changes_nothing(
     assert count(db, Order) == 0
     assert (stock_of(db, ok["id"]), stock_of(db, short_a["id"]), stock_of(db, short_b["id"])) == (10, 2, 2)
     assert count(db, CartItem) == 3
+
+
+def test_sold_out_checkout_answers_without_waiting_for_the_stock_lock(
+    client: TestClient, db: Session, admin_headers, customer_headers
+) -> None:
+    """In a flash sale most buyers lose. They must get their 409 immediately, not queue for the inventory row lock
+    that every winner needs (the load test showed 400 of 500 requests waiting in that queue)."""
+    product = create_product(client, admin_headers, initial_stock=1)
+    add_to_cart(client, customer_headers, product["id"], 1)
+    client.patch(f"/api/inventory/{product['id']}", json={"delta": -1, "reason": "adjustment"}, headers=admin_headers)
+    winner = engine.connect()  # another transaction holding the row lock, like a winning checkout in progress
+    winner.execute(select(Inventory).where(Inventory.product_id == product["id"]).with_for_update())
+    result: dict = {}
+    loser = threading.Thread(target=lambda: result.update(response=checkout(client, customer_headers)))
+    try:
+        loser.start()
+        loser.join(timeout=LOCK_WAIT_LIMIT_SECONDS)
+        assert not loser.is_alive(), "the sold-out checkout waited for the stock row lock"
+        assert result["response"].status_code == 409
+        assert result["response"].json()["error"]["details"][0]["available"] == 0
+    finally:
+        winner.rollback()
+        winner.close()
+        loser.join()
 
 
 def test_deactivated_product_in_cart_blocks_checkout(

@@ -9,6 +9,9 @@ __pycache__/
 .coverage
 htmlcov/
 
+# Load test data (contains login tokens) and results
+loadtest/.data/
+
 # Node
 node_modules/
 dist/
