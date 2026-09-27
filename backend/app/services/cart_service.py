@@ -1,7 +1,7 @@
 """Cart rules. The cart never reserves stock: availability is checked loosely here and for real (with row
 locks) at checkout. Otherwise anyone could hold stock hostage by leaving it in a cart."""
 
-from sqlalchemy import delete, func, select
+from sqlalchemy import delete, func, select, update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, joinedload, selectinload
@@ -44,8 +44,13 @@ def _get_or_create_cart_id(db: Session, user_id: int) -> int:
     return db.scalar(select(Cart.id).where(Cart.user_id == user_id))
 
 
-def _touch(db: Session, cart_id: int) -> None:
-    """Record cart activity (useful later for abandoned-cart cleanup)."""
+def _lock_cart(db: Session, cart_id: int) -> None:
+    """Row-lock the cart (the UPDATE takes the lock) and record activity. Must run BEFORE touching cart_items.
+
+    Lock order everywhere is: carts row → cart_items → inventory. Checkout locks the cart row first too, so a
+    cart edit and a checkout of the same cart queue up instead of deadlocking (edit holding an item row and
+    waiting for the cart, checkout holding the cart and waiting for the item).
+    """
     db.execute(Cart.__table__.update().where(Cart.id == cart_id).values(updated_at=func.now()))
 
 
@@ -64,8 +69,9 @@ def add_item(db: Session, user: User, product_id: int, quantity: int) -> Cart:
     """Add a product, or increase its quantity if it's already in the cart."""
     product = get_product(db, product_id)  # 404 if missing or inactive
     cart_id = _get_or_create_cart_id(db, user.id)
+    _lock_cart(db, cart_id)
 
-    insert = pg_insert(CartItem).values(cart_id=cart_id, product_id=product_id, quantity=quantity)
+    insert =pg_insert(CartItem).values(cart_id=cart_id, product_id=product_id, quantity=quantity)
     # Atomic "insert or add": the increment happens inside PostgreSQL, so two quick clicks can't both
     # read quantity 1 and both write 2 (a lost update), and can't both try to insert the same row.
     upsert = insert.on_conflict_do_update(
@@ -75,7 +81,6 @@ def add_item(db: Session, user: User, product_id: int, quantity: int) -> Cart:
     try:
         new_quantity = db.scalar(upsert)
         _ensure_available(product, new_quantity)
-        _touch(db, cart_id)
         db.commit()
     except IntegrityError as exc:
         db.rollback()
@@ -106,15 +111,19 @@ def _get_item(db: Session, user: User, product_id: int) -> CartItem:
 def set_item_quantity(db: Session, user: User, product_id: int, quantity: int) -> Cart:
     item = _get_item(db, user, product_id)
     _ensure_available(item.product, quantity)
-    item.quantity = quantity
-    _touch(db, item.cart_id)
+    _lock_cart(db, item.cart_id)
+    db.execute(
+        update(CartItem)
+        .where(CartItem.cart_id == item.cart_id, CartItem.product_id == product_id)
+        .values(quantity=quantity)
+    )
     db.commit()
     return get_cart(db, user)
 
 
 def remove_item(db: Session, user: User, product_id: int) -> Cart | None:
     item = _get_item(db, user, product_id)
+    _lock_cart(db, item.cart_id)
     db.execute(delete(CartItem).where(CartItem.cart_id == item.cart_id, CartItem.product_id == product_id))
-    _touch(db, item.cart_id)
     db.commit()
     return get_cart(db, user)

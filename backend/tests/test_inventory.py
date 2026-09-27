@@ -1,16 +1,14 @@
-import threading
-from concurrent.futures import ThreadPoolExecutor
+from collections import Counter
 
 import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
-from app.db import SessionLocal
 from app.models import Inventory, InventoryMovement, User
 from app.schemas.inventory import StockAdjustment
 from app.services import inventory_service
-from app.services.inventory_service import InsufficientStockError
+from tests.concurrency import run_concurrently
 from tests.factories import create_product
 
 
@@ -162,23 +160,15 @@ def test_concurrent_removals_never_oversell_or_lose_updates(
     removals "succeed" and the final stock is wrong. With SELECT ... FOR UPDATE they queue on the row.
     """
     product_id = create_product(client, admin_headers, initial_stock=STARTING_STOCK)["id"]
-    start_together = threading.Barrier(CONCURRENT_WORKERS)
     removal = StockAdjustment(delta=-1, reason="adjustment")
 
-    def remove_one_unit() -> str:
-        with SessionLocal() as session:
-            actor = session.get(User, admin.id)
-            start_together.wait()
-            try:
-                inventory_service.adjust_stock(session, product_id, removal, actor)
-                return "removed"
-            except InsufficientStockError:
-                return "insufficient"
+    results = run_concurrently(
+        [
+            lambda s: inventory_service.adjust_stock(s, product_id, removal, s.get(User, admin.id))
+            for _ in range(CONCURRENT_WORKERS)
+        ]
+    )
 
-    with ThreadPoolExecutor(max_workers=CONCURRENT_WORKERS) as pool:
-        results = list(pool.map(lambda _: remove_one_unit(), range(CONCURRENT_WORKERS)))
-
-    assert results.count("removed") == STARTING_STOCK
-    assert results.count("insufficient") == CONCURRENT_WORKERS - STARTING_STOCK
+    assert Counter(results) == {"ok": STARTING_STOCK, "INSUFFICIENT_STOCK": CONCURRENT_WORKERS - STARTING_STOCK}
     assert stock_of(db, product_id) == 0
     assert ledger_sum(db, product_id) == 0  # +10 initial, ten -1 movements

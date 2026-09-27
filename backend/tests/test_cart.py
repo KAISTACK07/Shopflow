@@ -1,15 +1,12 @@
-import threading
-from concurrent.futures import ThreadPoolExecutor
-
 import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
-from app.db import SessionLocal
 from app.models import Cart, CartItem, User
 from app.services import cart_service
 from app.services.auth_service import register_user
+from tests.concurrency import run_concurrently
 from tests.conftest import auth_headers
 from tests.factories import create_product
 
@@ -221,22 +218,6 @@ def test_carts_are_private(client: TestClient, db: Session, admin_headers, custo
 PARALLEL_CLICKS = 10
 
 
-def _run_in_parallel(action, times: int) -> list[str]:
-    start_together = threading.Barrier(times)
-
-    def worker() -> str:
-        with SessionLocal() as session:
-            start_together.wait()
-            try:
-                action(session)
-                return "ok"
-            except Exception as exc:  # report, don't hide: the test asserts every call succeeded
-                return f"{type(exc).__name__}: {exc}"
-
-    with ThreadPoolExecutor(max_workers=times) as pool:
-        return list(pool.map(lambda _: worker(), range(times)))
-
-
 def test_parallel_adds_of_same_product_are_all_counted(
     client: TestClient, db: Session, customer: User, admin_headers: dict[str, str]
 ) -> None:
@@ -244,8 +225,11 @@ def test_parallel_adds_of_same_product_are_all_counted(
     A read-then-write version either loses clicks or fails with a unique/primary-key violation."""
     product_id = create_product(client, admin_headers, initial_stock=50)["id"]
 
-    results = _run_in_parallel(
-        lambda session: cart_service.add_item(session, session.get(User, customer.id), product_id, 1), PARALLEL_CLICKS
+    results = run_concurrently(
+        [
+            lambda s: cart_service.add_item(s, s.get(User, customer.id), product_id, 1)
+            for _ in range(PARALLEL_CLICKS)
+        ]
     )
 
     assert results == ["ok"] * PARALLEL_CLICKS
