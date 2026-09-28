@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { ApiError, request, toApiError } from './client'
+import { brokenStorage, memoryStorage } from '../test/memoryStorage'
+import { ApiError, getToken, request, setToken, toApiError } from './client'
 
 afterEach(() => vi.unstubAllGlobals())
 
@@ -33,6 +34,35 @@ describe('request', () => {
 
     expect(error.code).toBe('NETWORK_ERROR')
     expect(error.outcomeUnknown).toBe(true)
+  })
+})
+
+describe('token storage', () => {
+  it('keeps the token across browser restarts only when "keep me signed in" is ticked', () => {
+    const local = memoryStorage()
+    const session = memoryStorage()
+    vi.stubGlobal('localStorage', local)
+    vi.stubGlobal('sessionStorage', session)
+
+    setToken('remembered', true)
+    expect([local.getItem('shopflow.token'), session.getItem('shopflow.token')]).toEqual(['remembered', null])
+
+    setToken('this-visit-only', false)
+    expect([local.getItem('shopflow.token'), session.getItem('shopflow.token')]).toEqual([null, 'this-visit-only'])
+    expect(getToken()).toBe('this-visit-only')
+
+    setToken(null)
+    expect(getToken()).toBeNull()
+  })
+
+  it('keeps the user logged in for the page when storage is blocked', () => {
+    vi.stubGlobal('localStorage', brokenStorage())
+    vi.stubGlobal('sessionStorage', brokenStorage())
+
+    setToken('in-memory', false)
+
+    expect(getToken()).toBe('in-memory')
+    setToken(null)
   })
 })
 

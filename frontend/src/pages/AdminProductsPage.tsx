@@ -22,7 +22,7 @@ export function AdminProductsPage() {
 
   return (
     <section>
-      <h1 className="text-5xl">Manage products</h1>
+      <h1 className="text-4xl sm:text-5xl">Manage products</h1>
       <NewProductForm onCreated={() => (offset === 0 ? products.reload() : setParams({}))} />
       <h2 className="mt-10 text-3xl">All products</h2>
       <p className="text-sm text-slate">Hidden products stay in past orders but can’t be bought.</p>
@@ -31,7 +31,7 @@ export function AdminProductsPage() {
         {products.loading && !products.data && <Loading what="products" />}
         {products.data && (
           <>
-            <ul className="border-t border-rule">
+            <ul className="flex flex-col gap-3">
               {products.data.items.map((p) => <AdminRow key={p.id} product={p} onChange={replace} />)}
             </ul>
             <Pager total={products.data.total} limit={PAGE_SIZE} offset={offset} onChange={(next) => setParams({ offset: String(next) })} />
@@ -85,7 +85,7 @@ function NewProductForm({ onCreated }: { onCreated: () => void }) {
   }
 
   return (
-    <form onSubmit={submit} noValidate className="mt-6 grid gap-4 border border-rule bg-surface p-5 sm:grid-cols-2">
+    <form onSubmit={submit} noValidate className="mt-6 grid gap-4 rounded-card border border-rule bg-surface p-5 shadow-card sm:grid-cols-2">
       <h2 className="text-2xl sm:col-span-2">Add a product</h2>
       <div><label htmlFor="sku" className={fieldLabel}>SKU</label><input id="sku" className={textInput} {...field('sku')} /></div>
       <div><label htmlFor="name" className={fieldLabel}>Name</label><input id="name" className={textInput} {...field('name')} /></div>
@@ -142,7 +142,7 @@ function AdminRow({ product, onChange }: { product: Product; onChange: (p: Produ
     })
 
   return (
-    <li className={`border-b border-rule bg-surface px-4 py-4 ${product.is_active ? '' : 'opacity-70'}`}>
+    <li className={`rounded-card border border-rule bg-surface px-4 py-4 shadow-card ${product.is_active ? '' : 'opacity-70'}`}>
       <div className="grid grid-cols-[5rem_1fr_auto] items-center gap-x-6 gap-y-2">
         <StockNumber quantity={product.stock_quantity} />
         <div className="min-w-0">

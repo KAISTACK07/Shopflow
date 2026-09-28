@@ -1,10 +1,10 @@
 # ShopFlow
 
 An e-commerce order and inventory backend built to survive a flash sale: many buyers, few units, all clicking at
-once. FastAPI, PostgreSQL and Redis, with a small React storefront. In a local load test, 500 simultaneous buyers
+once. FastAPI, PostgreSQL and Redis, with a React storefront for a small-batch clothing label. In a local load test, 500 simultaneous buyers
 competed for 100 units: exactly 100 orders, 400 clean "sold out" responses, **0 units oversold**.
 
-![Products page: every product row leads with its stock count](docs/screenshots/products.png)
+![Home page: hero banner, category cards and product grid, each photo showing how many are left](docs/screenshots/home.png)
 
 ## The problem
 
@@ -31,7 +31,9 @@ flowchart LR
 
 - **Backend:** routers (HTTP only) → services (business rules, transactions, locking) → SQLAlchemy models. One error
   shape everywhere: `{"error": {"code", "message", "details"}}`. JSON logs with a request id that nginx passes through.
-- **Frontend:** React + TypeScript (Vite), served by nginx on the same origin as the API, so no CORS.
+- **Frontend:** React + TypeScript (Vite), served by nginx on the same origin as the API, so no CORS. Brand, category,
+  colours, sizes and imagery come from a presentation layer (`frontend/src/lib/catalog.ts`) keyed by SKU; the API
+  only knows real product fields, and none of the presentation data is ever sent to it.
 - **Docker Compose:** health-checked start order: postgres and redis → backend (runs migrations, seeds demo data,
   then serves) → frontend.
 
@@ -60,6 +62,12 @@ flowchart LR
 - **Admission control:** at most as many requests in flight as there are DB connections; the rest queue, then get
   503 + `Retry-After`.
 - **Observability:** JSON logs, request ids, `GET /api/health` checking PostgreSQL and Redis.
+- **Storefront:** home page with hero and category cards; listing with filters (category, brand, material, colour,
+  price range, in stock only) that show live counts, sorting and grid/list views; product page with gallery, colour
+  and size selection; cart drawer and bag page; wishlist; light and dark mode; mobile layout with a filter drawer.
+  The stock badge on every photo uses one colour code: indigo in stock, turmeric low (5 or fewer), madder sold out.
+
+![Product page: gallery, stock badge, colour swatches and quantity](docs/screenshots/product.png)
 
 ## How the core works
 
@@ -237,8 +245,12 @@ cd ../frontend && npm test && npm run lint && npm run build
   - migrations: down/up round trip, model/migration drift, concurrent `alembic upgrade` from 5 processes;
   - **mutation checks:** each lock and guard was removed on purpose to confirm the matching test fails (e.g. without
     `FOR UPDATE` all 50 buyers got an order for 10 units; locking rows in random order caused deadlocks).
-- **Frontend: 25 vitest tests** (money parsing without float errors, API error mapping, idempotency-key reuse).
-- **Browser:** the whole shopping flow was checked in headless Microsoft Edge with Playwright (not part of the repo).
+- **Frontend: 73 vitest tests:** client-side filtering, facet counts and sorting; the catalog presentation layer;
+  size memory and the shipping-address note; wishlist, theme and token storage (including blocked storage); money
+  parsing without float errors; API error mapping; idempotency-key reuse; and the post-login redirect check, which
+  refuses `//other-site` links.
+- **Browser:** the whole shopping journey (search, filters, product page, cart, checkout, cancel, dark mode, phone
+  layout) was checked in headless Microsoft Edge with Playwright. The script is not part of the repo.
 
 ## Load test
 
@@ -274,6 +286,10 @@ checkout costs about 28 ms on an idle server, and every winning order serialises
 - Idempotency keys are never deleted; production would expire them (e.g. after 24 hours).
 - No payments, TLS, or email; order names show the product's current name, not a snapshot.
 - Rate limiting is a fixed window: up to 2× the limit is possible around a window boundary.
+- The storefront's brands, ratings, review counts and colour variants are demo presentation data in `catalog.ts`,
+  not from a real review system; the free-shipping and 7-day-returns badges describe no backend feature.
+- Sizes are display-only (the cart is keyed by product), so they travel as a note in the shipping address.
+- Filters and sorting run in the browser over the current page of results (the API supports search and paging only).
 
 ## Future improvements
 
@@ -289,7 +305,8 @@ This project was built with an AI coding agent (Claude Code) as a pair programme
 in 15 phases. In each phase the agent wrote the code, tests and documentation, ran the tests, migrations and smoke
 checks, and explained what changed; each phase was reviewed before it was committed. Design decisions were made
 explicitly along the way, for example adding an admin endpoint for order status, putting a shipping address in the
-checkout body, replaying only successful checkouts, and keeping the design notes private.
+checkout body, replaying only successful checkouts, and keeping the design notes private. The storefront redesign
+started from a clickable HTML mockup that was reviewed before any React code was written.
 
 The agent also did the verification work described above: breaking locks on purpose to prove the concurrency tests can
 fail, driving the UI in a real browser, and running the load test that found and fixed the server stall. Every number
@@ -305,7 +322,8 @@ backend/
   tests/           pytest suite, including live-server concurrency tests
   Dockerfile, docker-entrypoint.sh
 frontend/
-  src/             api/ (client, endpoints), pages/, components/, state/, lib/ (money, idempotency key)
+  src/             api/ (client, endpoints), pages/, components/, state/ (auth, cart, wishlist),
+                   lib/ (catalog presentation layer, filters, money, sizes, idempotency key, theme)
   Dockerfile, nginx.conf
 loadtest/          k6 flash-sale scenario, prepare and verify scripts
 docker-compose.yml, .env.example

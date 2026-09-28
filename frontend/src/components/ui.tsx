@@ -1,23 +1,43 @@
 import type { ReactNode } from 'react'
 import type { ApiError } from '../api/client'
+import { LOW_STOCK_AT, stockLabel, stockLevel, type StockLevel } from '../lib/stock'
 
-// Shared class names, so every button and input looks and behaves the same.
+export { LOW_STOCK_AT }
+
+// Shared class names, so every button, input and card looks and behaves the same.
+const pressable = 'transition duration-150 active:scale-[.98] disabled:cursor-not-allowed disabled:opacity-50 disabled:active:scale-100'
 export const primaryButton =
-  'inline-flex items-center justify-center rounded-control bg-indigo px-4 py-2 font-semibold text-white ' +
-  'hover:bg-indigo-dark disabled:cursor-not-allowed disabled:opacity-50'
+  `inline-flex min-h-11 items-center justify-center gap-2 rounded-control bg-indigo px-5 py-2.5 font-semibold text-on-indigo hover:bg-indigo-dark ${pressable}`
+/** The dark, high-emphasis button (Add to cart, Shop the collection). */
+export const ctaButton =
+  `inline-flex min-h-11 items-center justify-center gap-2 rounded-control bg-cta px-5 py-2.5 font-semibold text-on-cta hover:opacity-90 ${pressable}`
 export const quietButton =
-  'inline-flex items-center justify-center rounded-control border border-rule bg-surface px-3 py-1.5 text-sm ' +
-  'font-medium text-ink hover:border-indigo disabled:cursor-not-allowed disabled:opacity-50'
+  `inline-flex min-h-10 items-center justify-center gap-2 rounded-control border border-rule bg-surface px-3.5 py-2 text-sm font-semibold text-ink hover:border-indigo ${pressable}`
 export const textInput =
-  'w-full rounded-control border border-rule bg-surface px-3 py-2 text-ink placeholder:text-slate/70 focus:border-indigo'
-export const fieldLabel = 'block text-sm font-semibold'
+  'w-full rounded-control border border-rule bg-surface px-3.5 py-2.5 text-ink placeholder:text-slate/80 transition focus:border-indigo'
+export const fieldLabel = 'mb-1.5 block text-sm font-semibold'
+export const card = 'rounded-card border border-rule bg-surface shadow-card'
 
-export const LOW_STOCK_AT = 5 // the shop-wide default low-stock threshold on the backend
+const BADGE_COLOURS: Record<StockLevel, string> = {
+  plenty: 'bg-plenty-bg text-plenty-fg',
+  low: 'bg-low-bg text-low-fg',
+  out: 'bg-out-bg text-out-fg',
+}
 
-/** The one loud element: how many are left, coloured by scarcity. */
+/** Scarcity pill: "42 left" (indigo), "Only 3 left" (turmeric), "Sold out" (madder). */
+export function StockBadge({ quantity, className = '' }: { quantity: number; className?: string }) {
+  return (
+    <span className={`inline-flex items-center rounded-pill px-2.5 py-1 text-xs font-bold ${BADGE_COLOURS[stockLevel(quantity)]} ${className}`}>
+      {stockLabel(quantity)}
+    </span>
+  )
+}
+
+/** The big stock numeral (admin list and product page). */
 export function StockNumber({ quantity, size = 'row' }: { quantity: number; size?: 'row' | 'hero' }) {
-  const colour = quantity === 0 ? 'text-madder' : quantity <= LOW_STOCK_AT ? 'text-turmeric' : 'text-indigo'
-  const scale = size === 'hero' ? 'text-8xl' : 'text-5xl'
+  const level = stockLevel(quantity)
+  const colour = level === 'out' ? 'text-madder' : level === 'low' ? 'text-turmeric' : 'text-indigo'
+  const scale = size === 'hero' ? 'text-7xl' : 'text-5xl'
   return (
     <div className={`${colour} text-center`} aria-label={quantity === 0 ? 'Sold out' : `${quantity} left`}>
       <div className={`font-numeral ${scale}`} aria-hidden="true">
@@ -34,7 +54,7 @@ export function ErrorNotice({ error, children }: { error?: ApiError | string; ch
   if (!error && !children) return null
   const message = typeof error === 'string' ? error : error?.message
   return (
-    <div role="alert" className="border-l-4 border-madder bg-surface px-4 py-3 text-ink">
+    <div role="alert" className="rounded-control border border-out-bg border-l-4 border-l-madder bg-surface px-4 py-3 text-ink">
       {message && <p>{message}</p>}
       {children}
     </div>

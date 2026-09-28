@@ -23,22 +23,28 @@ export class ApiError extends Error {
   }
 }
 
-// Token in localStorage: simple and survives reloads. Trade-off: any script injected into the page (XSS) could
-// read it. An httpOnly cookie avoids that but needs CSRF protection; see the design notes.
+// Where the token lives: localStorage when "Keep me signed in" is ticked (survives closing the browser), otherwise
+// sessionStorage (gone when the browser closes). Trade-off: any script injected into the page (XSS) could read
+// either; an httpOnly cookie avoids that but needs CSRF protection. If storage is blocked entirely, the token is
+// kept in memory, so the user stays logged in until the page is reloaded.
+let memoryToken: string | null = null
+
 export function getToken(): string | null {
   try {
-    return localStorage.getItem(TOKEN_KEY)
+    return localStorage.getItem(TOKEN_KEY) ?? sessionStorage.getItem(TOKEN_KEY) ?? memoryToken
   } catch {
-    return null
+    return memoryToken
   }
 }
 
-export function setToken(token: string | null): void {
+export function setToken(token: string | null, remember = true): void {
+  memoryToken = token
   try {
-    if (token) localStorage.setItem(TOKEN_KEY, token)
-    else localStorage.removeItem(TOKEN_KEY)
+    localStorage.removeItem(TOKEN_KEY)
+    sessionStorage.removeItem(TOKEN_KEY)
+    if (token) (remember ? localStorage : sessionStorage).setItem(TOKEN_KEY, token)
   } catch {
-    // storage unavailable: the user stays logged in for this page only
+    // storage unavailable: memoryToken keeps the user logged in for this page
   }
 }
 

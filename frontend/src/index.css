@@ -1,20 +1,107 @@
 @import "tailwindcss";
 
-/* Design tokens. Palette from Indian textile dyes: indigo carries the brand and normal stock, turmeric marks
-   low stock, madder marks sold out and errors. Those three are the only colours that mean something. */
+/* Design tokens. Palette from Indian textile dyes: indigo carries the brand and normal stock, turmeric marks low
+   stock, madder marks sold out and errors. Those three stay the only colours that carry meaning; pink and the
+   lavender page are atmosphere for the storefront. Every colour is redefined for dark mode below. */
 @theme {
-  --color-ink: #1f2a55;
+  --color-ink: #1b2350;
+  --color-ink-soft: #454d6e;
   --color-indigo: #2e4aa8;
   --color-indigo-dark: #233a86;
+  --color-on-indigo: #ffffff;
+  --color-blue: #4f7cf0;
+  --color-pink: #d4418a;
   --color-turmeric: #c98f00;
   --color-madder: #b3261e;
   --color-slate: #5b6475;
-  --color-rule: #d5d9e3;
-  --color-page: #eef0f5;
+  --color-rule: #e1e0ee;
+  --color-page: #f4f2fb;
   --color-surface: #ffffff;
+  --color-surface-2: #efedf8;
+  --color-search: #ebe8f7;
+  --color-cta: #1b2350;
+  --color-on-cta: #ffffff;
+  --color-plenty-bg: #e5e9f8;
+  --color-plenty-fg: #2e4aa8;
+  --color-low-bg: #fcefcf;
+  --color-low-fg: #7a5600;
+  --color-out-bg: #fae1de;
+  --color-out-fg: #9c2019;
 
   --font-sans: "Archivo", system-ui, sans-serif;
-  --radius-control: 4px;
+  --font-hand: "Caveat", "Segoe Print", cursive;
+
+  --text-2xs: 0.6875rem;
+  --radius-control: 12px;
+  --radius-card: 14px;
+  --radius-hero: 24px;
+  --radius-pill: 999px;
+  --shadow-card: 0 1px 2px rgb(27 35 80 / 0.05), 0 6px 20px rgb(27 35 80 / 0.07);
+  --shadow-lift: 0 2px 6px rgb(27 35 80 / 0.07), 0 18px 40px rgb(27 35 80 / 0.13);
+  --shadow-bar: 0 1px 0 rgb(27 35 80 / 0.06);
+  --ease-out-soft: cubic-bezier(0.2, 0.7, 0.2, 1);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    color-scheme: dark;
+    --color-ink: #e9ebf5;
+    --color-ink-soft: #b9bed4;
+    --color-indigo: #93a5f3;
+    --color-indigo-dark: #aebcf7;
+    --color-on-indigo: #0e1122;
+    --color-blue: #7ea1ff;
+    --color-pink: #f07ab5;
+    --color-turmeric: #e8b84a;
+    --color-madder: #f07a70;
+    --color-slate: #9097b2;
+    --color-rule: #2a3052;
+    --color-page: #0d1020;
+    --color-surface: #161a2e;
+    --color-surface-2: #1d2240;
+    --color-search: #1f2544;
+    --color-cta: #e9ebf5;
+    --color-on-cta: #0e1122;
+    --color-plenty-bg: #232b4f;
+    --color-plenty-fg: #b3c0f8;
+    --color-low-bg: #3b3013;
+    --color-low-fg: #f2cf7a;
+    --color-out-bg: #3e1b1a;
+    --color-out-fg: #f6a69e;
+    --shadow-card: 0 1px 2px rgb(0 0 0 / 0.4), 0 8px 24px rgb(0 0 0 / 0.3);
+    --shadow-lift: 0 2px 6px rgb(0 0 0 / 0.45), 0 18px 40px rgb(0 0 0 / 0.4);
+    --shadow-bar: 0 1px 0 rgb(255 255 255 / 0.04);
+  }
+}
+
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --color-ink: #e9ebf5;
+  --color-ink-soft: #b9bed4;
+  --color-indigo: #93a5f3;
+  --color-indigo-dark: #aebcf7;
+  --color-on-indigo: #0e1122;
+  --color-blue: #7ea1ff;
+  --color-pink: #f07ab5;
+  --color-turmeric: #e8b84a;
+  --color-madder: #f07a70;
+  --color-slate: #9097b2;
+  --color-rule: #2a3052;
+  --color-page: #0d1020;
+  --color-surface: #161a2e;
+  --color-surface-2: #1d2240;
+  --color-search: #1f2544;
+  --color-cta: #e9ebf5;
+  --color-on-cta: #0e1122;
+  --color-plenty-bg: #232b4f;
+  --color-plenty-fg: #b3c0f8;
+  --color-low-bg: #3b3013;
+  --color-low-fg: #f2cf7a;
+  --color-out-bg: #3e1b1a;
+  --color-out-fg: #f6a69e;
+  --shadow-card: 0 1px 2px rgb(0 0 0 / 0.4), 0 8px 24px rgb(0 0 0 / 0.3);
+  --shadow-lift: 0 2px 6px rgb(0 0 0 / 0.45), 0 18px 40px rgb(0 0 0 / 0.4);
+  --shadow-bar: 0 1px 0 rgb(255 255 255 / 0.04);
 }
 
 @layer base {
@@ -23,24 +110,155 @@
     color: var(--color-ink);
     font-family: var(--font-sans);
     line-height: 1.5;
+    -webkit-font-smoothing: antialiased;
   }
   h1,
-  h2 {
-    font-stretch: 75%;
+  h2,
+  h3 {
+    font-stretch: 78%;
     font-weight: 800;
-    line-height: 1.1;
+    line-height: 1.08;
     letter-spacing: -0.01em;
+    text-wrap: balance;
   }
   :focus-visible {
     outline: 2px solid var(--color-indigo);
     outline-offset: 2px;
   }
+  button:not(:disabled),
+  [role="button"]:not([aria-disabled="true"]) {
+    cursor: pointer;
+  }
 }
 
-/* Condensed, heavy numerals: the stock count is the one loud element on the page. */
+/* Condensed, heavy numerals: the stock count stays the brand's signature. */
 @utility font-numeral {
   font-stretch: 62%;
   font-weight: 800;
   font-variant-numeric: tabular-nums;
   line-height: 1;
+}
+
+/* Iridescent hero: layered radial gradients over a soft conic swirl. */
+@utility bg-holo {
+  background:
+    radial-gradient(60% 80% at 85% 20%, rgb(212 65 138 / 0.35), transparent 60%),
+    radial-gradient(55% 70% at 15% 90%, rgb(79 124 240 / 0.35), transparent 60%),
+    radial-gradient(40% 60% at 60% 100%, rgb(151 110 255 / 0.3), transparent 60%),
+    conic-gradient(from 200deg at 70% 40%, #efe7ff, #ffe6f3, #e3ecff, #f3e9ff, #efe7ff);
+}
+
+@utility text-gradient-you {
+  background: linear-gradient(90deg, var(--color-indigo), var(--color-pink));
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+
+@utility bg-pill-active {
+  background: linear-gradient(90deg, var(--color-indigo), var(--color-blue));
+  color: var(--color-on-indigo);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) .bg-holo {
+    background:
+      radial-gradient(60% 80% at 85% 20%, rgb(240 122 181 / 0.28), transparent 60%),
+      radial-gradient(55% 70% at 15% 90%, rgb(126 161 255 / 0.25), transparent 60%),
+      conic-gradient(from 200deg at 70% 40%, #1c1840, #2a1733, #15213f, #231a44, #1c1840);
+  }
+}
+:root[data-theme="dark"] .bg-holo {
+  background:
+    radial-gradient(60% 80% at 85% 20%, rgb(240 122 181 / 0.28), transparent 60%),
+    radial-gradient(55% 70% at 15% 90%, rgb(126 161 255 / 0.25), transparent 60%),
+    conic-gradient(from 200deg at 70% 40%, #1c1840, #2a1733, #15213f, #231a44, #1c1840);
+}
+
+@keyframes shimmer {
+  to {
+    background-position: -200% 0;
+  }
+}
+@utility skeleton {
+  background: linear-gradient(90deg, var(--color-surface-2) 0%, var(--color-rule) 50%, var(--color-surface-2) 100%);
+  background-size: 200% 100%;
+  animation: shimmer 1.4s linear infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
+/* Drawer entrances (the drawers unmount on close, so only the entrance animates). */
+@keyframes drawer-right {
+  from {
+    transform: translateX(100%);
+  }
+}
+@keyframes drawer-up {
+  from {
+    transform: translateY(100%);
+  }
+}
+@keyframes fade-in {
+  from {
+    opacity: 0;
+  }
+}
+@utility animate-drawer-right {
+  animation: drawer-right 0.28s var(--ease-out-soft);
+}
+@utility animate-drawer-up {
+  animation: drawer-up 0.3s var(--ease-out-soft);
+}
+@utility animate-fade-in {
+  animation: fade-in 0.2s ease-out;
+}
+
+/* Dual-thumb price slider: two native range inputs stacked on one track. The inputs ignore the pointer except on
+   their thumbs, so each thumb can be dragged, and each input keeps its native keyboard support and label. */
+.dual-range input[type="range"] {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 24px;
+  margin: 0;
+  appearance: none;
+  background: none;
+  pointer-events: none;
+}
+.dual-range input[type="range"]::-webkit-slider-thumb {
+  appearance: none;
+  pointer-events: auto;
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  background: var(--color-surface);
+  border: 3px solid var(--color-indigo);
+  box-shadow: var(--shadow-card);
+  cursor: grab;
+}
+.dual-range input[type="range"]::-moz-range-thumb {
+  pointer-events: auto;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: var(--color-surface);
+  border: 3px solid var(--color-indigo);
+  cursor: grab;
+}
+.dual-range input[type="range"]:focus-visible::-webkit-slider-thumb {
+  outline: 2px solid var(--color-indigo);
+  outline-offset: 2px;
+}
+.dual-range input[type="range"]:focus-visible::-moz-range-thumb {
+  outline: 2px solid var(--color-indigo);
+  outline-offset: 2px;
 }
